@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block header %}仪表盘{% endblock %}
+{% block page_icon %}bi bi-speedometer2{% endblock %}
+{% block page_desc %}系统运行总览：数据源、任务、文章与今日抓取情况一览。{% endblock %}
+{% block content %}
+
+<div class="welcome-bar">
+  <div>
+    <h2>{{ current_user.nickname or current_user.username }}，欢迎回来 👋</h2>
+    <p>今天是 {{ today }} · 共接入 {{ stats.sources }} 个数据源，{{ stats.tasks_enabled }} 个定时任务运行中。</p>
+  </div>
+  <div class="quick">
+    <a href="{{ url_for('sources.index') }}"><i class="bi bi-cloud-arrow-down"></i>去抓取</a>
+    <a href="{{ url_for('tasks.index') }}"><i class="bi bi-clock-history"></i>定时任务</a>
+    <a href="{{ url_for('articles.manual_import') }}"><i class="bi bi-pencil-square"></i>手动导入</a>
+    <a href="{{ url_for('articles.index') }}"><i class="bi bi-file-earmark-text"></i>文章文件</a>
+  </div>
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-sm-6 col-lg-3">
+    <div class="card kpi-card">
+      <span class="kpi-icon c-blue"><i class="bi bi-database"></i></span>
+      <div class="kpi-body">
+        <div class="kpi-label">数据源（启用/总数）</div>
+        <div class="kpi-value">{{ stats.sources_enabled }}<span class="sub">/{{ stats.sources }}</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="col-sm-6 col-lg-3">
+    <div class="card kpi-card">
+      <span class="kpi-icon c-indigo"><i class="bi bi-calendar2-check"></i></span>
+      <div class="kpi-body">
+        <div class="kpi-label">任务（启用/总数）</div>
+        <div class="kpi-value">{{ stats.tasks_enabled }}<span class="sub">/{{ stats.tasks }}</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="col-sm-6 col-lg-3">
+    <div class="card kpi-card">
+      <span class="kpi-icon c-teal"><i class="bi bi-file-earmark-text"></i></span>
+      <div class="kpi-body">
+        <div class="kpi-label">累计文章</div>
+        <div class="kpi-value">{{ stats.articles }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-sm-6 col-lg-3">
+    <div class="card kpi-card">
+      <span class="kpi-icon c-amber"><i class="bi bi-lightning-charge"></i></span>
+      <div class="kpi-body">
+        <div class="kpi-label">今日抓取（成功）</div>
+        <div class="kpi-value">{{ stats.today_articles }}<span class="sub">（{{ stats.today_ok }}）</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-3">
+  <div class="col-lg-6">
+    <div class="card h-100">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-list-columns-reverse me-2" style="color:var(--brand)"></i>最近抓取日志</span>
+        <a href="{{ url_for('logs.index') }}" class="btn btn-sm btn-outline-secondary">全部</a>
+      </div>
+      <div class="card-body p-0">
+        <table class="table table-sm mb-0">
+          <thead><tr><th>来源</th><th>状态</th><th>新增/总数</th><th>时间</th></tr></thead>
+          <tbody>
+          {% for l in recent_logs %}
+            <tr>
+              <td class="small">{{ l.source.name if l.source else '-' }}</td>
+              <td>
+                {% if l.status == 'success' %}<span class="badge bg-success">成功</span>
+                {% elif l.status == 'error' %}<span class="badge bg-danger">失败</span>
+                {% elif l.status == 'stopped' %}<span class="badge bg-warning">已停止</span>
+                {% else %}<span class="badge bg-warning">运行中</span>{% endif %}
+              </td>
+              <td>{{ l.new_count }}/{{ l.total_count }}</td>
+              <td class="small-muted">{{ l.started_at.strftime('%m-%d %H:%M') if l.started_at else '' }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="4" class="empty-state"><span class="es-ico"><i class="bi bi-clipboard-data"></i></span><span class="es-msg">暂无抓取记录</span></td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-6">
+    <div class="card h-100">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-file-earmark-text me-2" style="color:var(--brand)"></i>最近文章</span>
+        <a href="{{ url_for('articles.index') }}" class="btn btn-sm btn-outline-secondary">全部</a>
+      </div>
+      <div class="card-body p-0">
+        <table class="table table-sm mb-0">
+          <thead><tr><th>标题</th><th>分类</th><th>时间</th></tr></thead>
+          <tbody>
+          {% for a in recent_articles %}
+            <tr>
+              <td class="small text-truncate" style="max-width:280px">{{ a.title }}</td>
+              <td class="small">{{ a.source.category if a.source else '' }}</td>
+              <td class="small-muted">{{ a.crawled_at.strftime('%m-%d %H:%M') if a.crawled_at else '' }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="3" class="empty-state"><span class="es-ico"><i class="bi bi-inbox"></i></span><span class="es-msg">暂无文章</span></td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,33 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+build/
+dist/
+.venv/
+venv/
+env/
+.python-version
+
+# ---- 运行时数据（不提交） ----
+data/crawler.db
+data/output/
+data/server.log
+# 开发期调试探针文件（_xuexi_* / _probe* 等）
+data/_*
+
+# ---- 日志 ----
+*.log
+logs/
+
+# ---- 系统 / IDE ----
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ---- Claude / 本地工具 ----
+.claude/

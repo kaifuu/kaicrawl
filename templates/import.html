@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block header %}手动导入文章（生成 WORD）{% endblock %}
+{% block page_icon %}bi bi-pencil-square{% endblock %}
+{% block page_desc %}适用于公众号、学习强国等无法自动抓取的来源。{% endblock %}
+{% block content %}
+<div class="card"><div class="card-body">
+<div class="hint-card"><i class="bi bi-info-circle-fill"></i><span>适用于公众号、学习强国等无法自动抓取的来源：粘贴标题与正文，系统按格式规范生成 WORD 并归入对应分类的当天文件夹。</span></div>
+<form method="post">
+  <div class="row g-3">
+    <div class="col-md-6">
+      <label class="form-label">数据源 *</label>
+      <select name="source_id" class="form-select" required>
+        <option value="">请选择...</option>
+        {% for s in sources %}
+          <option value="{{ s.id }}">[{{ s.category }}] {{ s.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">作者</label>
+      <input name="author" class="form-control" placeholder="留空则按来源策略">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">发布日期</label>
+      <input type="date" name="publish_date" class="form-control">
+    </div>
+    <div class="col-12">
+      <label class="form-label">标题 *</label>
+      <input name="title" class="form-control" required>
+    </div>
+    <div class="col-12">
+      <label class="form-label">正文 *（每行一段，将保留段落顺序）</label>
+      <textarea name="content" class="form-control" rows="14" required></textarea>
+    </div>
+    <div class="col-12">
+      <button class="btn btn-primary">生成 WORD</button>
+      <a href="{{ url_for('articles.index') }}" class="btn btn-link">返回</a>
+    </div>
+  </div>
+</form>
+</div></div>
+{% endblock %}

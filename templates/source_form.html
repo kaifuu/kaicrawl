@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block header %}{% if source %}编辑数据源{% else %}新增数据源{% endif %}{% endblock %}
+{% block page_icon %}bi bi-pencil-square{% endblock %}
+{% block page_desc %}配置来源的分类、入口 URL、解析器插件与作者策略。{% endblock %}
+{% block content %}
+<div class="card"><div class="card-body">
+<form method="post">
+  <div class="row g-3">
+    <div class="col-md-4">
+      <label class="form-label">新闻分类 *</label>
+      <input class="form-control" name="category" required
+             value="{{ source.category if source else '' }}" placeholder="如 领导活动">
+    </div>
+    <div class="col-md-4">
+      <label class="form-label">来源名称 *</label>
+      <input class="form-control" name="name" required
+             value="{{ source.name if source else '' }}" placeholder="如 人民网">
+    </div>
+    <div class="col-md-4">
+      <label class="form-label">来源类型</label>
+      <select class="form-select" name="source_type">
+        {% set cur_type = source.source_type if source else 'website' %}
+        <option value="website" {{ 'selected' if cur_type=='website' }}>website</option>
+        <option value="wechat" {{ 'selected' if cur_type=='wechat' }}>wechat</option>
+        <option value="xuexi" {{ 'selected' if cur_type=='xuexi' }}>xuexi</option>
+      </select>
+    </div>
+    <div class="col-md-6">
+      <label class="form-label">入口 URL</label>
+      <input class="form-control" name="url"
+             value="{{ source.url if source else '' }}" placeholder="https://...">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">解析器插件</label>
+      <select class="form-select" name="parser_key">
+        {% set cur_key = source.parser_key if source else 'bjdch' %}
+        {% for key, label in parser_options %}
+          <option value="{{ key }}" {{ 'selected' if key==cur_key }}>{{ key }}（{{ label }}）</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">作者策略</label>
+      <input class="form-control" name="author_policy"
+             value="{{ source.author_policy if source else '' }}" placeholder="单位动态填 各单位，否则留空">
+    </div>
+    <div class="col-12">
+      <label class="form-label">备注</label>
+      <input class="form-control" name="remark" value="{{ source.remark if source else '' }}">
+    </div>
+    <div class="col-12">
+      <div class="form-check">
+        <input class="form-check-input" type="checkbox" name="enabled" id="en"
+               {{ 'checked' if (source and source.enabled) or not source }}>
+        <label class="form-check-label" for="en">启用</label>
+      </div>
+    </div>
+    <div class="col-12">
+      <button class="btn btn-primary">保存</button>
+      <a href="{{ url_for('sources.index') }}" class="btn btn-link">返回</a>
+    </div>
+  </div>
+</form>
+</div></div>
+{% endblock %}

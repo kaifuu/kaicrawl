@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block header %}编辑人员 · {{ user.username }}{% endblock %}
+{% block page_icon %}bi bi-person-gear{% endblock %}
+{% block page_desc %}编辑昵称、角色，或重置登录密码。{% endblock %}
+{% block content %}
+<div class="card"><div class="card-body">
+  <form method="post">
+    <div class="row g-3">
+      <div class="col-md-4"><label class="form-label">用户名 <span class="small-muted">（不可改）</span></label><input class="form-control" value="{{ user.username }}" disabled></div>
+      <div class="col-md-4"><label class="form-label">昵称</label><input class="form-control" name="nickname" value="{{ user.nickname }}"></div>
+      <div class="col-md-4"><label class="form-label">角色</label>
+        <select class="form-select" name="role_id">
+          <option value="">— 未分配 —</option>
+          {% for rid, rname in role_options %}<option value="{{ rid }}" {% if user.role_id == rid %}selected{% endif %}>{{ rname }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="col-md-6"><label class="form-label">新密码 <span class="small-muted">（留空不修改，填写即重置）</span></label><input class="form-control" type="password" name="password" autocomplete="new-password"></div>
+      <div class="col-md-6 d-flex align-items-center"><div class="form-check"><input class="form-check-input" type="checkbox" name="enabled" id="en" {% if user.enabled %}checked{% endif %}><label class="form-check-label" for="en">启用</label></div></div>
+      <div class="col-12">
+        <button class="btn btn-primary">保存</button>
+        <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('admin.users') }}">返回</a>
+      </div>
+    </div>
+  </form>
+</div></div>
+{% endblock %}

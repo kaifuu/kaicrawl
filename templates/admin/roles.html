@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% from "_pagination.html" import render_pagination %}
+{% block header %}角色管理{% endblock %}
+{% block page_icon %}bi bi-shield-lock{% endblock %}
+{% block page_desc %}管理角色与标识，并为角色分配可访问菜单。{% endblock %}
+{% block content %}
+<div class="toolbar">
+  <span class="small-muted">共 {{ pagination.total }} 个角色</span>
+  {% if current_user.has_perm('role:add') %}
+  <button class="btn btn-primary btn-sm" data-bs-toggle="collapse" data-bs-target="#newRole"><i class="bi bi-plus-lg"></i> 新增角色</button>
+  {% endif %}
+</div>
+
+{% if current_user.has_perm('role:add') %}
+<div class="collapse mb-3" id="newRole"><div class="card"><div class="card-body">
+  <form method="post" action="{{ url_for('admin.role_new') }}" class="row g-2 align-items-end">
+    <div class="col-md-3"><label class="form-label">角色名 *</label><input class="form-control form-control-sm" name="name" required></div>
+    <div class="col-md-3"><label class="form-label">标识 * <span class="small-muted">（如 operator）</span></label><input class="form-control form-control-sm" name="code" required></div>
+    <div class="col-md-3"><label class="form-label">备注</label><input class="form-control form-control-sm" name="remark"></div>
+    <div class="col-md-3"><button class="btn btn-primary btn-sm w-100">保存</button></div>
+  </form>
+</div></div></div>
+{% endif %}
+
+<div class="card"><div class="card-body p-0">
+  <table class="table table-hover align-middle">
+    <thead><tr><th>角色名</th><th>标识</th><th>备注</th><th>状态</th><th>菜单数</th><th class="text-end">操作</th></tr></thead>
+    <tbody>
+    {% for r in roles %}
+    <tr>
+      <td>{{ r.name }}{% if r.code == 'admin' %} <span class="badge bg-secondary">内置</span>{% endif %}</td>
+      <td><code>{{ r.code }}</code></td>
+      <td class="small-muted">{{ r.remark }}</td>
+      <td>{% if r.enabled %}<span class="badge bg-success">启用</span>{% else %}<span class="badge bg-secondary">禁用</span>{% endif %}</td>
+      <td>{{ r.menus|length }}</td>
+      <td>
+        <div class="d-flex gap-1 justify-content-end">
+          {% if current_user.has_perm('role:assign') %}<a class="btn btn-sm btn-outline-primary" href="{{ url_for('admin.role_menus', rid=r.id) }}">分配菜单</a>{% endif %}
+          {% if current_user.has_perm('role:edit') %}<a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.role_edit', rid=r.id) }}">编辑</a>{% endif %}
+          {% if current_user.has_perm('role:delete') and r.code != 'admin' %}<form method="post" action="{{ url_for('admin.role_delete', rid=r.id) }}" style="display:inline" onsubmit="return confirm('删除角色 {{ r.name }}？');"><button class="btn btn-sm btn-outline-danger">删除</button></form>{% endif %}
+        </div>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="6" class="empty-state"><span class="es-ico"><i class="bi bi-shield"></i></span><span class="es-msg">暂无角色</span></td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div></div>
+{{ render_pagination(pagination, 'admin.roles', {}) }}
+{% endblock %}

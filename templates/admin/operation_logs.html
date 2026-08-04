@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% from "_pagination.html" import render_pagination %}
+{% block header %}操作日志{% endblock %}
+{% block page_icon %}bi bi-activity{% endblock %}
+{% block page_desc %}查看用户操作请求的方法、路径、状态与耗时。{% endblock %}
+{% block content %}
+<form method="get" class="card mb-3"><div class="card-body">
+  <div class="row g-2 align-items-end">
+    <div class="col-md-4"><label class="form-label">搜索（路径/用户）</label><input class="form-control form-control-sm" name="q" value="{{ q }}"></div>
+    <div class="col-md-1"><button class="btn btn-primary btn-sm w-100">筛选</button></div>
+  </div>
+</div></form>
+<div class="card"><div class="card-body p-0">
+  <table class="table table-hover table-sm align-middle">
+    <thead><tr><th>时间</th><th>用户</th><th>方法</th><th>路径</th><th>状态</th><th>耗时</th><th>IP</th></tr></thead>
+    <tbody>
+    {% for l in logs %}
+    <tr>
+      <td class="small-muted">{{ l.created_at.strftime('%Y-%m-%d %H:%M:%S') if l.created_at else '' }}</td>
+      <td>{{ l.username }}</td>
+      <td><span class="badge {% if l.method=='POST' %}bg-primary{% elif l.method=='DELETE' %}bg-danger{% else %}bg-secondary{% endif %}">{{ l.method }}</span></td>
+      <td class="small text-break">{{ l.path }}</td>
+      <td>{% if l.status_code and l.status_code < 400 %}<span class="badge bg-success">{{ l.status_code }}</span>{% else %}<span class="badge bg-danger">{{ l.status_code }}</span>{% endif %}</td>
+      <td class="small-muted">{{ l.duration_ms }}ms</td>
+      <td class="small-muted">{{ l.ip }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="7" class="empty-state"><span class="es-ico"><i class="bi bi-activity"></i></span><span class="es-msg">暂无记录</span></td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div></div>
+{{ render_pagination(pagination, 'admin.operation_logs', {'q': q}) }}
+{% endblock %}

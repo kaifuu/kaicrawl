@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block header %}编辑角色 · {{ role.name }}{% endblock %}
+{% block page_icon %}bi bi-shield{% endblock %}
+{% block page_desc %}编辑角色名称、标识、备注与启停状态。{% endblock %}
+{% block content %}
+<div class="card"><div class="card-body">
+  <form method="post">
+    <div class="row g-3">
+      <div class="col-md-4"><label class="form-label">角色名</label><input class="form-control" name="name" value="{{ role.name }}" required></div>
+      <div class="col-md-4"><label class="form-label">标识 <span class="small-muted">（不可改）</span></label><input class="form-control" value="{{ role.code }}" disabled></div>
+      <div class="col-md-4"><label class="form-label">备注</label><input class="form-control" name="remark" value="{{ role.remark }}"></div>
+      <div class="col-12"><div class="form-check"><input class="form-check-input" type="checkbox" name="enabled" id="en" {% if role.enabled %}checked{% endif %}><label class="form-check-label" for="en">启用</label></div></div>
+      <div class="col-12">
+        <button class="btn btn-primary">保存</button>
+        <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('admin.roles') }}">返回</a>
+      </div>
+    </div>
+  </form>
+</div></div>
+{% endblock %}

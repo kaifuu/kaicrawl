@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% from "_pagination.html" import render_pagination %}
+{% block header %}运行日志{% endblock %}
+{% block page_icon %}bi bi-journal-text{% endblock %}
+{% block page_desc %}查看每次抓取的开始时间、状态、新增数量与耗时；可搜索、刷新，或停止运行中的任务。{% endblock %}
+{% block content %}
+
+<div class="log-filterbar">
+  <form method="get" class="lf-form">
+    <div class="filter-search">
+      <i class="bi bi-search"></i>
+      <input class="form-control form-control-sm" name="q" value="{{ q }}" placeholder="搜索来源 / 分类 / 消息" aria-label="搜索" onkeydown="if(event.keyCode===13)this.form.submit()">
+    </div>
+    <div class="lf-selects">
+      <select name="source_id" class="form-select form-select-sm lf-source" onchange="this.form.submit()" title="按来源筛选">
+        <option value="">全部来源</option>
+        {% for s in sources %}<option value="{{ s.id }}" {{ 'selected' if source_id==s.id }}>[{{ s.category }}] {{ s.name }}</option>{% endfor %}
+      </select>
+      <select name="status" class="form-select form-select-sm lf-status" onchange="this.form.submit()" title="按状态筛选">
+        <option value="">全部状态</option>
+        {% for k, v in [('success','成功'), ('error','失败'), ('running','运行中'), ('stopped','已停止')] %}
+        <option value="{{ k }}" {{ 'selected' if status==k }}>{{ v }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </form>
+
+  <div class="lf-actions">
+    {% if q or source_id or status %}<a class="lf-reset" href="{{ url_for('logs.index') }}" title="清除所有筛选"><i class="bi bi-x-lg"></i> 重置</a>{% endif %}
+    <button class="btn-icon" type="button" onclick="location.reload()" title="刷新"><i class="bi bi-arrow-clockwise"></i></button>
+    <div class="dropdown">
+      <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" title="清空日志"><i class="bi bi-eraser"></i> 清空</button>
+      <ul class="dropdown-menu dropdown-menu-end lf-clear-menu">
+        <li><span class="dropdown-item-text small text-muted">仅清空选中类型</span></li>
+        <li><form method="post" action="{{ url_for('logs.clear') }}" onsubmit="return confirm('清空全部「成功」日志？');"><input type="hidden" name="status" value="success"><button class="dropdown-item" type="submit"><i class="bi bi-check-circle me-2 text-success"></i>成功</button></form></li>
+        <li><form method="post" action="{{ url_for('logs.clear') }}" onsubmit="return confirm('清空全部「失败」日志？');"><input type="hidden" name="status" value="error"><button class="dropdown-item" type="submit"><i class="bi bi-x-circle me-2 text-danger"></i>失败</button></form></li>
+        <li><form method="post" action="{{ url_for('logs.clear') }}" onsubmit="return confirm('清空全部「运行中」日志？');"><input type="hidden" name="status" value="running"><button class="dropdown-item" type="submit"><span class="badge is-running me-2"><span class="dot"></span></span>运行中</button></form></li>
+        <li><form method="post" action="{{ url_for('logs.clear') }}" onsubmit="return confirm('清空全部「已停止」日志？');"><input type="hidden" name="status" value="stopped"><button class="dropdown-item" type="submit"><i class="bi bi-stop-circle me-2 text-warning"></i>已停止</button></form></li>
+        <li><hr class="dropdown-divider"></li>
+        <li><form method="post" action="{{ url_for('logs.clear') }}" onsubmit="return confirm('清空【全部】运行日志？此操作不可恢复！');"><button class="dropdown-item text-danger" type="submit"><i class="bi bi-trash me-2"></i>清空全部</button></form></li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+{% set running = logs|selectattr('status','equalto','running')|list %}
+{% set has_running = running|length > 0 %}
+<div class="card"><div class="card-body p-0">
+<table class="table table-sm table-hover mb-0 align-middle logs-table">
+  <thead><tr>
+    <th>#</th><th>来源</th><th>触发</th><th>状态</th><th>新增/总数</th><th>开始时间</th><th>耗时</th><th>消息</th>{% if has_running %}<th class="text-end" style="width:1%">操作</th>{% endif %}
+  </tr></thead>
+  <tbody>
+  {% for l in logs %}
+    <tr class="log-row log-{{ l.status }}">
+      <td class="small-muted">{{ l.id }}</td>
+      <td>
+        {% if l._source %}{{ l._source.name }}<div class="small-muted">{{ l._source.category }}</div>{% else %}<span class="small-muted">—</span>{% endif %}
+      </td>
+      <td>{% if l.task_id %}<span class="badge bg-primary">定时</span>{% else %}<span class="badge bg-secondary">手动</span>{% endif %}</td>
+      <td>
+        {% if l.status == 'success' %}<span class="badge bg-success"><i class="bi bi-check-circle"></i> 成功</span>
+        {% elif l.status == 'error' %}<span class="badge bg-danger"><i class="bi bi-x-circle"></i> 失败</span>
+        {% elif l.status == 'running' %}<span class="badge is-running"><span class="dot"></span> 运行中</span>
+        {% elif l.status == 'stopped' %}<span class="badge bg-warning"><i class="bi bi-stop-circle"></i> 已停止</span>
+        {% else %}<span class="badge bg-secondary">{{ l.status }}</span>{% endif %}
+      </td>
+      <td><b>{{ l.new_count }}</b><span class="small-muted">/{{ l.total_count }}</span></td>
+      <td class="small-muted">{{ l.started_at.strftime('%m-%d %H:%M:%S') if l.started_at else '' }}</td>
+      <td class="small-muted">{% if l.started_at and l.finished_at %}{{ (l.finished_at - l.started_at).seconds }}s{% else %}—{% endif %}</td>
+      <td class="small msg-cell" title="{{ l.message }}">{{ l.message }}</td>
+      {% if has_running %}<td class="text-end">
+        {% if l.status == 'running' %}
+        <form method="post" action="{{ url_for('logs.stop') }}" onsubmit="return confirm('停止该抓取任务？将在当前文章处理完成后停止。');" style="display:inline">
+          <input type="hidden" name="log_id" value="{{ l.id }}">
+          <button class="btn btn-sm btn-outline-danger" title="停止运行中的任务"><i class="bi bi-stop-circle"></i> 停止</button>
+        </form>
+        {% else %}<span class="small-muted">—</span>{% endif %}
+      </td>{% endif %}
+    </tr>
+  {% else %}
+    <tr><td colspan="{{ 9 if has_running else 8 }}" class="empty-state"><span class="es-ico"><i class="bi bi-journal-x"></i></span><span class="es-msg">暂无日志</span></td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div></div>
+{{ render_pagination(pagination, 'logs.index', {'source_id': source_id or '', 'status': status or '', 'q': q or '', 'per_page': per_page}, per_page=per_page, per_page_options=per_page_options) }}
+
+{# 有运行中的任务时自动刷新，便于观察进度 #}
+{% if running %}
+<script>setTimeout(function(){ location.reload(); }, 8000);</script>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block header %}URL 批量导入{% endblock %}
+{% block page_icon %}bi bi-link-45deg{% endblock %}
+{% block page_desc %}批量粘贴公众号文章链接，自动抓取正文并生成 WORD。{% endblock %}
+{% block content %}
+<div class="card"><div class="card-body">
+  <div class="hint-card"><i class="bi bi-info-circle-fill"></i><span>从微信复制文章链接（<code>mp.weixin.qq.com/s/xxx</code>），每行一个粘贴后提交。系统自动抓取正文/图片并生成 WORD，适用于<strong>公众号</strong>等无列表接口的来源。</span></div>
+  <form method="post">
+    <div class="row g-3">
+      <div class="col-md-6">
+        <label class="form-label">归入来源 *</label>
+        <select class="form-select" name="source_id" required>
+          <option value="">请选择来源...</option>
+          {% for s in sources %}
+          <option value="{{ s.id }}" {% if source_id == s.id %}selected{% endif %}>
+            [{{ s.category }}] {{ s.name }}{% if s.source_type == 'wechat' %}（公众号）{% endif %}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-12">
+        <label class="form-label">文章链接（每行一个）</label>
+        <textarea class="form-control" name="urls" rows="10"
+                  placeholder="https://mp.weixin.qq.com/s/xxxx&#10;https://mp.weixin.qq.com/s/yyyy">{{ urls or '' }}</textarea>
+      </div>
+      <div class="col-12">
+        <button class="btn btn-primary"><i class="bi bi-cloud-download"></i> 开始抓取</button>
+        <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('articles.index') }}">返回</a>
+      </div>
+    </div>
+  </form>
+</div></div>
+
+{% if results %}
+<div class="card mt-3"><div class="card-header">抓取结果</div><div class="card-body p-0">
+  <table class="table table-sm mb-0 align-middle">
+    <thead><tr><th style="width:1%">#</th><th>链接</th><th style="width:1%">结果</th><th>说明</th></tr></thead>
+    <tbody>
+    {% for u, ok, msg in results %}
+    <tr>
+      <td class="small-muted">{{ loop.index }}</td>
+      <td class="small text-break" style="max-width:380px">{{ u }}</td>
+      <td>{% if ok %}<span class="badge bg-success">成功</span>{% else %}<span class="badge bg-danger">失败</span>{% endif %}</td>
+      <td class="small">{{ msg }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div></div>
+{% endif %}
+{% endblock %}

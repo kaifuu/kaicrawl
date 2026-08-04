@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% from "_pagination.html" import render_pagination %}
+{% block header %}任务管理{% endblock %}
+{% block page_icon %}bi bi-clock-history{% endblock %}
+{% block page_desc %}为数据源创建每日定时抓取任务，支持立即运行与启停。{% endblock %}
+{% block content %}
+<div class="toolbar">
+  <form method="get" class="d-flex gap-2" style="min-width:260px">
+    <input class="form-control form-control-sm" name="q" value="{{ q }}" placeholder="搜索任务名称">
+    <button class="btn btn-outline-secondary btn-sm">搜索</button>
+  </form>
+</div>
+
+{% if current_user.has_perm('task:add') %}
+<div class="card mb-3"><div class="card-body">
+<h6 class="card-title">新建定时任务（每天在指定时间抓取一个来源）</h6>
+<form method="post" action="{{ url_for('tasks.new') }}" class="row g-2 align-items-end">
+  <div class="col-md-5">
+    <label class="form-label small">数据源</label>
+    <select name="source_id" class="form-select" required>
+      {% for s in sources %}
+        <option value="{{ s.id }}">[{{ s.category }}] {{ s.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-md-3">
+    <label class="form-label small">每日执行时间 (HH:MM)</label>
+    <input type="time" name="run_time" class="form-control" value="08:00" required>
+  </div>
+  <div class="col-md-3">
+    <label class="form-label small">任务名称（可选）</label>
+    <input name="name" class="form-control" placeholder="留空自动生成">
+  </div>
+  <div class="col-md-1">
+    <button class="btn btn-primary w-100">创建</button>
+  </div>
+</form>
+<p class="small-muted mt-2 mb-0">提示：同一来源如需多个时间点，可创建多个任务。</p>
+</div></div>
+{% endif %}
+
+<div class="card"><div class="card-body p-0">
+<table class="table table-hover mb-0 align-middle">
+  <thead><tr>
+    <th>任务名称</th><th>来源</th><th>每日时间</th><th>下次运行</th><th>上次运行</th><th>状态</th><th style="width:1%">操作</th>
+  </tr></thead>
+  <tbody>
+  {% for t in tasks %}
+    <tr>
+      <td>{{ t.name }}</td>
+      <td class="small">[{{ t.source.category }}] {{ t.source.name }}</td>
+      <td><code>{{ t.run_time }}</code></td>
+      <td class="small-muted">{{ t._next_run or '—' }}</td>
+      <td class="small-muted">
+        {{ t.last_run_at.strftime('%m-%d %H:%M') if t.last_run_at else '—' }}
+        {% if t.last_status == 'success' %}<span class="badge bg-success">成功</span>
+        {% elif t.last_status == 'error' %}<span class="badge bg-danger">失败</span>{% endif %}
+      </td>
+      <td>{% if t.enabled %}<span class="badge bg-success">启用</span>{% else %}<span class="badge bg-secondary">禁用</span>{% endif %}</td>
+      <td>
+        <div class="d-flex gap-1">
+          {% if current_user.has_perm('task:run') %}<form method="post" action="{{ url_for('tasks.run', tid=t.id) }}"><button class="btn btn-sm btn-outline-primary">运行</button></form>{% endif %}
+          {% if current_user.has_perm('task:toggle') %}<form method="post" action="{{ url_for('tasks.toggle', tid=t.id) }}"><button class="btn btn-sm btn-outline-warning">{% if t.enabled %}禁用{% else %}启用{% endif %}</button></form>{% endif %}
+          {% if current_user.has_perm('task:delete') %}<form method="post" action="{{ url_for('tasks.delete', tid=t.id) }}" onsubmit="return confirm('删除该任务？');"><button class="btn btn-sm btn-outline-danger">删除</button></form>{% endif %}
+        </div>
+      </td>
+    </tr>
+  {% else %}
+    <tr><td colspan="7" class="empty-state"><span class="es-ico"><i class="bi bi-calendar2-x"></i></span><span class="es-msg">暂无任务，请在上方创建</span></td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div></div>
+{{ render_pagination(pagination, 'tasks.index', {'q': q}) }}
+{% endblock %}

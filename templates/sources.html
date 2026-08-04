@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% block header %}数据源管理{% endblock %}
+{% block page_icon %}bi bi-cloud-arrow-down{% endblock %}
+{% block page_desc %}维护各数据源：抓取、启停、编辑，或从 Excel 重新导入。{% endblock %}
+{% block content %}
+<div class="toolbar">
+  <form method="get" class="d-flex gap-2">
+    <input class="form-control form-control-sm" name="q" value="{{ q }}" placeholder="搜索名称 / URL" style="max-width:220px">
+    <select class="form-select form-select-sm" name="category" style="max-width:160px" onchange="this.form.submit()">
+      <option value="">全部分类</option>
+      {% for c in categories %}<option value="{{ c }}" {% if category == c %}selected{% endif %}>{{ c }}</option>{% endfor %}
+    </select>
+    <button class="btn btn-outline-secondary btn-sm">搜索</button>
+  </form>
+  <div class="actions">
+    {% if grouped %}
+    <div class="btn-group btn-group-sm" role="group">
+      <button class="btn btn-outline-secondary" onclick="srcExpandAll(true)" title="展开全部分类"><i class="bi bi-arrows-expand"></i> 全部展开</button>
+      <button class="btn btn-outline-secondary" onclick="srcExpandAll(false)" title="折叠全部分类"><i class="bi bi-arrows-collapse"></i> 全部折叠</button>
+    </div>
+    {% endif %}
+    {% if current_user.has_perm('source:reimport') %}
+    <form method="post" action="{{ url_for('sources.reimport') }}" style="display:inline" onsubmit="return confirm('从 Excel 同步数据源（不会删除已有）？');">
+      <button class="btn btn-outline-secondary btn-sm">从 Excel 重新导入</button>
+    </form>
+    {% endif %}
+    {% if current_user.has_perm('source:add') %}
+    <a href="{{ url_for('sources.new') }}" class="btn btn-primary btn-sm"><i class="bi bi-plus-lg me-1"></i>新增数据源</a>
+    {% endif %}
+  </div>
+</div>
+
+{% for category_name, items in grouped.items() %}
+{% set cat_id = 'src-cat-' ~ loop.index %}
+{% set type_ico = {'website':'bi-globe2','wechat':'bi-wechat','xuexi':'bi-mortarboard-fill'} %}
+<div class="card source-card mb-3" data-category="{{ category_name }}">
+  <div class="card-header source-header collapsed-toggle" data-bs-toggle="collapse" data-bs-target="#{{ cat_id }}" aria-expanded="true" aria-controls="{{ cat_id }}" role="button">
+    <span class="source-header-main">
+      <i class="bi bi-folder-fill source-cat-icon"></i>
+      <span class="source-cat-name">{{ category_name }}</span>
+      <span class="badge source-count">{{ items|length }}</span>
+    </span>
+    <i class="bi bi-chevron-down source-caret"></i>
+  </div>
+  <div id="{{ cat_id }}" class="collapse show source-collapse">
+    <div class="src-grid">
+      {% for s in items %}
+      <div class="src-item card{{ '' if s.enabled else ' is-off' }}">
+        <div class="src-item-head">
+          <span class="src-ico t-{{ s.source_type }}"><i class="bi {{ type_ico[s.source_type] or 'bi-globe2' }}"></i></span>
+          <div class="src-title-wrap">
+            <div class="src-title">
+              {{ s.name }}
+              {% if s.enabled %}<span class="badge bg-success">启用</span>{% else %}<span class="badge bg-secondary">禁用</span>{% endif %}
+            </div>
+            <div class="src-remark small-muted">{{ s.remark or '—' }}</div>
+          </div>
+        </div>
+
+        {% if s.url %}
+        <div class="src-item-url" title="{{ s.url }}">{{ s.url }}</div>
+        {% else %}
+        <div class="src-item-url" style="color:var(--warning)"><i class="bi bi-exclamation-triangle me-1"></i>无 URL，需手动导入</div>
+        {% endif %}
+
+        <div class="src-item-meta">
+          <span class="chip"><i class="bi bi-plugin"></i>{{ s.parser_key }}</span>
+          <span class="chip"><i class="bi bi-tag"></i>{{ s.source_type }}</span>
+          <span class="chip"><i class="bi bi-person"></i>{{ s.author_policy or '默认' }}</span>
+        </div>
+
+        <div class="src-item-foot">
+          {% if current_user.has_perm('source:run') %}
+          <form method="post" action="{{ url_for('sources.run', sid=s.id) }}" class="src-run-form">
+            <input type="date" name="since" class="form-control form-control-sm" title="起始日期：从该日期翻页抓到今天（留空=仅当前页）">
+            <button type="submit" class="btn btn-sm btn-primary" title="立即抓取（跳过已有）"><i class="bi bi-play-fill"></i> 抓取</button>
+            <button type="submit" formaction="{{ url_for('sources.run_overwrite', sid=s.id) }}" class="btn btn-sm btn-outline-primary" title="覆盖抓取（刷新已有）" onclick="return confirm('覆盖抓取：将重新抓取并替换已存在的文章（含 WORD 文件），确认？');">覆盖</button>
+          </form>
+          {% endif %}
+          <div class="src-more dropdown">
+            <button class="btn-icon" type="button" data-bs-toggle="dropdown" aria-expanded="false" title="更多操作"><i class="bi bi-three-dots-vertical"></i></button>
+            <ul class="dropdown-menu dropdown-menu-end">
+              <li><a class="dropdown-item" href="{{ url_for('logs.index', source_id=s.id) }}"><i class="bi bi-list-ul me-2"></i>抓取日志</a></li>
+              {% if current_user.has_perm('source:edit') %}<li><a class="dropdown-item" href="{{ url_for('sources.edit', sid=s.id) }}"><i class="bi bi-pencil me-2"></i>编辑</a></li>{% endif %}
+              {% if current_user.has_perm('source:edit') %}<li><form method="post" action="{{ url_for('sources.toggle', sid=s.id) }}"><button type="submit" class="dropdown-item"><i class="bi bi-power me-2"></i>{% if s.enabled %}禁用{% else %}启用{% endif %}</button></form></li>{% endif %}
+              {% if current_user.has_perm('source:delete') %}<li><hr class="dropdown-divider"></li><li><form method="post" action="{{ url_for('sources.delete', sid=s.id) }}" onsubmit="return confirm('删除该数据源及其任务？');"><button type="submit" class="dropdown-item text-danger"><i class="bi bi-trash me-2"></i>删除</button></form></li>{% endif %}
+            </ul>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% else %}
+<div class="card"><div class="card-body empty-state"><span class="es-ico"><i class="bi bi-cloud-slash"></i></span><span class="es-msg">没有匹配的数据源</span></div></div>
+{% endfor %}
+
+<script>
+(function () {
+  var KEY = 'src_collapse_v1';
+  var saved = JSON.parse(localStorage.getItem(KEY) || '{}');
+  var cards = document.querySelectorAll('.source-card');
+
+  cards.forEach(function (card) {
+    var cat = card.getAttribute('data-category');
+    var header = card.querySelector('.source-header');
+    var body = card.querySelector('.source-collapse');
+    if (!header || !body || !cat) return;
+    // 恢复折叠状态（bootstrap 扫描 data-bs-toggle 之前同步移除 show，状态保持一致）
+    if (saved[cat]) {
+      body.classList.remove('show');
+      header.setAttribute('aria-expanded', 'false');
+      header.classList.add('collapsed');
+    }
+    header.addEventListener('hidden.bs.collapse', function () { saved[cat] = true;  localStorage.setItem(KEY, JSON.stringify(saved)); });
+    header.addEventListener('shown.bs.collapse',  function () { saved[cat] = false; localStorage.setItem(KEY, JSON.stringify(saved)); });
+  });
+
+  // 全部展开 / 折叠
+  window.srcExpandAll = function (expand) {
+    cards.forEach(function (card) {
+      var cat = card.getAttribute('data-category');
+      var header = card.querySelector('.source-header');
+      var body = card.querySelector('.source-collapse');
+      if (!header || !body) return;
+      if (expand) { body.classList.add('show');    header.setAttribute('aria-expanded', 'true');  header.classList.remove('collapsed'); saved[cat] = false; }
+      else        { body.classList.remove('show'); header.setAttribute('aria-expanded', 'false'); header.classList.add('collapsed');    saved[cat] = true;  }
+    });
+    localStorage.setItem(KEY, JSON.stringify(saved));
+  };
+})();
+</script>
+{% endblock %}

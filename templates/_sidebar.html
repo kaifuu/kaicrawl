@@ -1,0 +1,30 @@
+{# 递归渲染菜单树；node = {"menu": Menu, "children": [...]} #}
+{% macro render_menu(nodes) %}
+<ul class="menu-tree">
+{% for node in nodes %}
+  {% set m = node.menu %}
+  {% if m.type == 'directory' and node.children %}
+  <li class="menu-item">
+    <a class="menu-link directory" data-bs-toggle="collapse" href="#mnav-{{ m.id }}" aria-expanded="true">
+      <span class="menu-icon">{{ m.icon }}</span>
+      <span class="menu-text">{{ m.name }}</span>
+      <i class="bi bi-chevron-down caret ms-auto"></i>
+    </a>
+    <div class="collapse show" id="mnav-{{ m.id }}">
+      {{ render_menu(node.children) }}
+    </div>
+  </li>
+  {% elif m.type == 'menu' %}
+  {% set is_active = (request.endpoint == m.path) %}
+  <li class="menu-item">
+    <a class="menu-link{% if is_active %} active{% endif %}" href="{{ menu_url(m) }}">
+      <span class="menu-icon">{{ m.icon }}</span>
+      <span class="menu-text">{{ m.name }}</span>
+    </a>
+  </li>
+  {% endif %}
+{% endfor %}
+</ul>
+{% endmacro %}
+
+{{ render_menu(sidebar_roots) }}

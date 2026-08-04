@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block header %}菜单管理{% endblock %}
+{% block page_icon %}bi bi-list-nested{% endblock %}
+{% block page_desc %}维护侧边栏菜单结构、图标、端点与权限码。{% endblock %}
+{% block content %}
+<div class="toolbar">
+  <span class="small-muted">共 {{ tree|length }} 个顶级菜单</span>
+  <div class="actions">
+    <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('admin.menus') }}">刷新</a>
+    <a class="btn btn-primary btn-sm" href="{{ url_for('admin.menu_new') }}"><i class="bi bi-plus-lg"></i> 新增菜单</a>
+  </div>
+</div>
+<div class="card"><div class="card-body p-0">
+  <table class="table align-middle">
+    <thead><tr><th>名称</th><th>标识</th><th>类型</th><th>路径/端点</th><th>权限</th><th>排序</th><th>显示</th><th class="text-end">操作</th></tr></thead>
+    <tbody>
+    {% macro render_rows(nodes, depth=0) %}
+      {% for node in nodes %}
+      {% set m = node.menu %}
+      <tr>
+        <td><span style="padding-left:{{ depth*18 }}px">{{ m.icon }} {{ m.name }}</span></td>
+        <td><code>{{ m.code }}</code></td>
+        <td>{% if m.type=='directory' %}<span class="badge bg-info text-dark">目录</span>{% elif m.type=='button' %}<span class="badge bg-secondary">按钮</span>{% else %}<span class="badge bg-primary">菜单</span>{% endif %}</td>
+        <td class="small-muted">{{ m.path or '—' }}</td>
+        <td class="small">{{ m.permission or '—' }}</td>
+        <td>{{ m.sort_order }}</td>
+        <td>{% if m.visible %}<span class="badge bg-success">显示</span>{% else %}<span class="badge bg-secondary">隐藏</span>{% endif %}</td>
+        <td>
+          <div class="d-flex gap-1 justify-content-end">
+            <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.menu_edit', mid=m.id) }}">编辑</a>
+            <form method="post" action="{{ url_for('admin.menu_delete', mid=m.id) }}" style="display:inline" onsubmit="return confirm('删除菜单 {{ m.name }}？');"><button class="btn btn-sm btn-outline-danger">删除</button></form>
+          </div>
+        </td>
+      </tr>
+      {% if node.children %}{{ render_rows(node.children, depth+1) }}{% endif %}
+      {% endfor %}
+    {% endmacro %}
+    {{ render_rows(tree) }}
+    {% if not tree %}<tr><td colspan="8" class="empty-state"><span class="es-ico"><i class="bi bi-list-nested"></i></span><span class="es-msg">暂无菜单</span></td></tr>{% endif %}
+    </tbody>
+  </table>
+</div></div>
+{% endblock %}

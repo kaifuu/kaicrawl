@@ -1,0 +1,45 @@
+{# 通用分页控件。
+   pagination: SQLAlchemy Pagination 对象；endpoint / args: 构造分页链接。
+   per_page / per_page_options: 传入则额外在左下角渲染「每页 N 条」切换
+   （用于把每页选择放在列表底部，如运行日志页）。其它页面不传则行为不变。 #}
+{% macro render_pagination(pagination, endpoint, args={}, per_page=None, per_page_options=None) %}
+{% set has_pages = pagination and pagination.pages and pagination.pages > 1 %}
+{% if has_pages or per_page_options %}
+<div class="pagination-bar">
+  <div class="pg-left">
+    {% if pagination %}
+    <span class="pg-info">共 <b>{{ pagination.total }}</b> 条{% if has_pages %} · 第 {{ pagination.page }}/{{ pagination.pages }} 页{% endif %}</span>
+    {% endif %}
+    {% if per_page_options %}
+    <form method="get" class="pg-perpage-form" action="{{ url_for(endpoint) }}">
+      {% for k, v in args.items() %}{% if k != 'per_page' and v %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endif %}{% endfor %}
+      <span class="pg-perpage-label">每页</span>
+      <select name="per_page" class="form-select form-select-sm pg-perpage-sel" onchange="this.form.submit()" title="每页显示条数">
+        {% for n in per_page_options %}<option value="{{ n }}" {{ 'selected' if per_page==n }}>{{ n }}</option>{% endfor %}
+      </select>
+      <span class="pg-perpage-label">条</span>
+    </form>
+    {% endif %}
+  </div>
+  {% if has_pages %}
+  <ul class="pagination pagination-sm mb-0">
+    <li class="page-item {% if not pagination.has_prev %}disabled{% endif %}">
+      <a class="page-link" href="{% if pagination.has_prev %}{{ url_for(endpoint, page=pagination.prev_num, **args) }}{% else %}#{% endif %}" aria-label="上一页"><i class="bi bi-chevron-left"></i></a>
+    </li>
+    {% for p in pagination.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
+      {% if p %}
+      <li class="page-item {% if p == pagination.page %}active{% endif %}">
+        <a class="page-link" href="{{ url_for(endpoint, page=p, **args) }}">{{ p }}</a>
+      </li>
+      {% else %}
+      <li class="page-item disabled"><span class="page-link">…</span></li>
+      {% endif %}
+    {% endfor %}
+    <li class="page-item {% if not pagination.has_next %}disabled{% endif %}">
+      <a class="page-link" href="{% if pagination.has_next %}{{ url_for(endpoint, page=pagination.next_num, **args) }}{% else %}#{% endif %}" aria-label="下一页"><i class="bi bi-chevron-right"></i></a>
+    </li>
+  </ul>
+  {% endif %}
+</div>
+{% endif %}
+{% endmacro %}

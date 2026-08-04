@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% from "_pagination.html" import render_pagination %}
+{% block header %}人员管理{% endblock %}
+{% block page_icon %}bi bi-people{% endblock %}
+{% block page_desc %}管理系统人员、角色绑定与启停状态。{% endblock %}
+{% block content %}
+<div class="toolbar">
+  <form method="get" class="d-flex gap-2" style="min-width:260px">
+    <input class="form-control form-control-sm" name="q" value="{{ q }}" placeholder="搜索用户名/昵称">
+    <button class="btn btn-outline-secondary btn-sm">搜索</button>
+  </form>
+  {% if current_user.has_perm('user:add') %}
+  <button class="btn btn-primary btn-sm" data-bs-toggle="collapse" data-bs-target="#newUser"><i class="bi bi-plus-lg"></i> 新增人员</button>
+  {% endif %}
+</div>
+
+{% if current_user.has_perm('user:add') %}
+<div class="collapse mb-3" id="newUser"><div class="card"><div class="card-body">
+  <form method="post" action="{{ url_for('admin.user_new') }}" class="row g-2 align-items-end">
+    <div class="col-md-2"><label class="form-label">用户名 *</label><input class="form-control form-control-sm" name="username" required></div>
+    <div class="col-md-2"><label class="form-label">初始密码 *</label><input class="form-control form-control-sm" type="password" name="password" required></div>
+    <div class="col-md-2"><label class="form-label">昵称</label><input class="form-control form-control-sm" name="nickname"></div>
+    <div class="col-md-3"><label class="form-label">角色</label>
+      <select class="form-select form-select-sm" name="role_id">
+        {% for rid, rname in role_options %}<option value="{{ rid }}">{{ rname }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="col-md-1"><div class="form-check"><input class="form-check-input" type="checkbox" name="enabled" checked id="en"><label class="form-check-label small" for="en">启用</label></div></div>
+    <div class="col-md-2"><button class="btn btn-primary btn-sm w-100">保存</button></div>
+  </form>
+</div></div></div>
+{% endif %}
+
+<div class="card"><div class="card-body p-0">
+  <table class="table table-hover align-middle">
+    <thead><tr><th>用户名</th><th>昵称</th><th>角色</th><th>状态</th><th>最后登录</th><th class="text-end">操作</th></tr></thead>
+    <tbody>
+    {% for u in users %}
+    <tr>
+      <td>{{ u.username }}{% if u.username == 'admin' %} <span class="badge bg-secondary">内置</span>{% endif %}</td>
+      <td>{{ u.nickname }}</td>
+      <td>{{ u.role.name if u.role else '—' }}</td>
+      <td>{% if u.enabled %}<span class="badge bg-success">启用</span>{% else %}<span class="badge bg-secondary">禁用</span>{% endif %}</td>
+      <td class="small-muted">{{ u.last_login_at.strftime('%Y-%m-%d %H:%M') if u.last_login_at else '—' }}</td>
+      <td>
+        <div class="d-flex gap-1 justify-content-end">
+          {% if current_user.has_perm('user:edit') %}<a class="btn btn-sm btn-outline-primary" href="{{ url_for('admin.user_edit', uid=u.id) }}">编辑</a>{% endif %}
+          {% if current_user.has_perm('user:toggle') %}<form method="post" action="{{ url_for('admin.user_toggle', uid=u.id) }}" style="display:inline"><button class="btn btn-sm btn-outline-warning">{% if u.enabled %}禁用{% else %}启用{% endif %}</button></form>{% endif %}
+          {% if current_user.has_perm('user:delete') and u.username != 'admin' %}<form method="post" action="{{ url_for('admin.user_delete', uid=u.id) }}" style="display:inline" onsubmit="return confirm('删除用户 {{ u.username }}？');"><button class="btn btn-sm btn-outline-danger">删除</button></form>{% endif %}
+        </div>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="6" class="empty-state"><span class="es-ico"><i class="bi bi-people"></i></span><span class="es-msg">暂无人员</span></td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div></div>
+{{ render_pagination(pagination, 'admin.users', {'q': q}) }}
+{% endblock %}

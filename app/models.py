@@ -16,6 +16,7 @@ class Source(db.Model):
     source_type = db.Column(db.String(32), default="website")         # website / wechat / xuexi
     parser_key = db.Column(db.String(64), nullable=False)             # 映射到解析器插件
     author_policy = db.Column(db.String(64), default="")              # 单位动态 -> 「各单位」
+    content_xpath = db.Column(db.String(255), default="")             # 详情页正文区域 XPath，留空=用解析器默认选择器
     enabled = db.Column(db.Boolean, default=True)
     remark = db.Column(db.String(255), default="")
     created_at = db.Column(db.DateTime, default=datetime.now)

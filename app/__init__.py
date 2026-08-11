@@ -10,6 +10,23 @@ from . import excel_sync, scheduler_jobs, auth, security_seed
 from config import DATA_DIR, OUTPUT_DIR, EXCEL_PATH, DB_URI, BASE_DIR
 
 
+def _ensure_columns():
+    """SQLite 轻量迁移：db.create_all 只建缺失的表，不会给已有表加列。
+
+    手动检查 sources 表，缺列则 ALTER TABLE 补上。幂等，可随启动重复执行。
+    不引入 Alembic，与项目「删 db 重建」的轻量风格一致，且不丢现有数据。
+    """
+    from sqlalchemy import inspect, text
+    insp = inspect(db.engine)
+    if "sources" not in insp.get_table_names():
+        return
+    cols = {c["name"] for c in insp.get_columns("sources")}
+    if "content_xpath" not in cols:
+        with db.engine.begin() as conn:
+            conn.execute(text(
+                "ALTER TABLE sources ADD COLUMN content_xpath VARCHAR(255) DEFAULT ''"))
+
+
 def create_app(start_sched=True):
     app = Flask(
         __name__,
@@ -30,6 +47,7 @@ def create_app(start_sched=True):
 
     with app.app_context():
         db.create_all()
+        _ensure_columns()
         seeded = excel_sync.seed_if_empty(EXCEL_PATH)
         if seeded:
             app.logger.info("已从 Excel 种子导入 %d 个数据源", seeded)

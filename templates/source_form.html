@@ -45,6 +45,13 @@
              value="{{ source.author_policy if source else '' }}" placeholder="单位动态填 各单位，否则留空">
     </div>
     <div class="col-12">
+      <label class="form-label">详情页正文区域 XPath</label>
+      <input class="form-control" name="content_xpath"
+             value="{{ source.content_xpath if source else '' }}"
+             placeholder="可选，如 /html/body/div[8]/div[3] 或 //div[@class='detail_content']">
+      <div class="form-text">可选。详情页正文容器的 XPath，设置后<strong>优先于</strong>解析器默认选择器精确定位正文。留空则沿用默认。匹配为空或写错时自动回退默认选择器，不影响抓取。</div>
+    </div>
+    <div class="col-12">
       <label class="form-label">备注</label>
       <input class="form-control" name="remark" value="{{ source.remark if source else '' }}">
     </div>

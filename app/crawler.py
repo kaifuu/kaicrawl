@@ -76,12 +76,13 @@ def _article_intact(article):
     return os.path.isfile(os.path.join(OUTPUT_DIR, article.docx_path))
 
 
-def run_source(source_id, task_id=None, overwrite=False, since_date=None):
+def run_source(source_id, task_id=None, overwrite=False, since_date=None, limit=None):
     """抓取单个数据源，返回本次的 CrawlLog。已在运行则直接返回 None。
 
     overwrite=True 时，对当前列表里已存在的文章先删旧记录与旧 WORD，再重新抓取生成
     （刷新内容、避免文件名 _2/_3 堆积）；默认 False 仍按 URL 跳过已有。
     since_date(YYYY-MM-DD) 非空时回溯抓取：翻页直到早于该日期（仅支持翻页的解析器）。
+    limit 为本次最多抓取篇数（界面输入），None 时用解析器默认上限。
     """
     source = db.session.get(Source, source_id)
     if not source:
@@ -103,7 +104,7 @@ def run_source(source_id, task_id=None, overwrite=False, since_date=None):
     stopped = False
     try:
         parser = get_parser(source)
-        items = parser.fetch_list(since_date=since_date)
+        items = parser.fetch_list(since_date=since_date, limit=limit)
         total = len(items)
 
         for it in items:

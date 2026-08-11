@@ -102,24 +102,25 @@ class DangjianParser(GenericGovParser):
         return ""
 
     # ---------------- 列表 ----------------
-    def fetch_list(self, since_date=None):
+    def fetch_list(self, since_date=None, limit=None):
         """读取党建网 JS 数据文件获取文章列表。
 
         无栏目 id（如首页党建要闻）时回退到父类（扫 HTML <a>）的默认实现。
+        limit 为本次最多抓取篇数（来自界面输入）；留空则用配置默认。
         """
         cid = self._column_id()
         if not cid:
-            return super().fetch_list(since_date)
+            return super().fetch_list(since_date=since_date, limit=limit)
 
         base = self._js_base()
-        cap = MAX_ARTICLES_BACKFILL if since_date else MAX_ARTICLES_PER_RUN
+        cap = limit or (MAX_ARTICLES_BACKFILL if since_date else MAX_ARTICLES_PER_RUN)
 
         # 1) 页码 -> 子文章数据文件名
         try:
             guide = self._get(f"{base}/js/{cid}/mi4_page_articles_guide.js").text
         except ParserError:
             # guide 取不到，说明该栏目不支持 JS 数据模式，回退默认
-            return super().fetch_list(since_date)
+            return super().fetch_list(since_date=since_date, limit=limit)
         page_map = self._extract_js_json(guide) or {}
         page_nums = sorted((int(k) for k in page_map if str(k).isdigit()))
 
@@ -142,7 +143,10 @@ class DangjianParser(GenericGovParser):
             for a in arts:
                 url = a.get("url") or a.get("external_link") or ""
                 title = clean_text(a.get("title") or "")
-                if not url or len(title) < self.link_text_min_len or url in seen:
+                # JS 数据文件已是权威文章列表，不套用 link_text_min_len(默认8)：
+                # 那是给通用 HTML 扫描过滤"首页/更多"导航用的，这里会误删短标题
+                # （如 7 字的《三官堂前湘江红》）。仅留 2 字防垃圾。
+                if not url or len(title) < 2 or url in seen:
                     continue
                 pub = self._norm_date(a.get("pub_date") or "")
                 # 假定页码按日期降序：早于起始日期则收尾

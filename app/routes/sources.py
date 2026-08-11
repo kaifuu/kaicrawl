@@ -11,7 +11,7 @@ from ..extensions import db
 from ..models import Source
 from ..sources import PARSER_REGISTRY
 from .. import scheduler_jobs, excel_sync
-from config import EXCEL_PATH
+from config import EXCEL_PATH, MAX_ARTICLES_BACKFILL
 
 bp = Blueprint("sources", __name__)
 
@@ -31,6 +31,23 @@ def _since_from_form():
     if since and not re.match(r"^\d{4}-\d{2}-\d{2}$", since):
         return None, "起始日期格式应为 YYYY-MM-DD"
     return since or None, None
+
+
+def _limit_from_form():
+    """读取表单 limit（本次最多抓取篇数），返回 int 或 None（None=用解析器默认）。
+
+    空 → None；非法或 <1 → None（容错，不报错打断）；超过上限则截到 MAX_ARTICLES_BACKFILL。
+    """
+    raw = (request.form.get("limit") or "").strip()
+    if not raw:
+        return None
+    try:
+        n = int(raw)
+    except ValueError:
+        return None
+    if n < 1:
+        return None
+    return min(n, MAX_ARTICLES_BACKFILL)
 
 
 @bp.route("/")
@@ -63,6 +80,7 @@ def new():
             source_type=request.form.get("source_type", "website").strip(),
             parser_key=request.form.get("parser_key", "bjdch").strip(),
             author_policy=request.form.get("author_policy", "").strip(),
+            content_xpath=request.form.get("content_xpath", "").strip(),
             remark=request.form.get("remark", "").strip(),
             enabled=request.form.get("enabled") == "on",
         )
@@ -91,6 +109,7 @@ def edit(sid):
         s.source_type = request.form.get("source_type", "website").strip()
         s.parser_key = request.form.get("parser_key", "bjdch").strip()
         s.author_policy = request.form.get("author_policy", "").strip()
+        s.content_xpath = request.form.get("content_xpath", "").strip()
         s.remark = request.form.get("remark", "").strip()
         s.enabled = request.form.get("enabled") == "on"
         db.session.commit()
@@ -134,7 +153,9 @@ def run(sid):
     if err:
         flash(err, "danger")
         return redirect(url_for("sources.index"))
-    scheduler_jobs.run_now(current_app._get_current_object(), s.id, since_date=since)
+    limit = _limit_from_form()
+    scheduler_jobs.run_now(current_app._get_current_object(), s.id,
+                           since_date=since, limit=limit)
     flash(f"已触发抓取：{s.name}（后台执行中，请稍后查看日志）", "info")
     return redirect(url_for("sources.index"))
 
@@ -153,8 +174,9 @@ def run_overwrite(sid):
     if err:
         flash(err, "danger")
         return redirect(url_for("sources.index"))
+    limit = _limit_from_form()
     scheduler_jobs.run_now(current_app._get_current_object(), s.id,
-                           overwrite=True, since_date=since)
+                           overwrite=True, since_date=since, limit=limit)
     flash(f"已触发覆盖抓取：{s.name}（后台执行中，请稍后查看日志）", "info")
     return redirect(url_for("sources.index"))
 

@@ -58,7 +58,10 @@
         </div>
 
         {% if s.url %}
-        <div class="src-item-url" title="{{ s.url }}">{{ s.url }}</div>
+        <div class="src-item-url">
+          <a href="{{ s.url }}" target="_blank" rel="noopener noreferrer" title="{{ s.url }}"><i class="bi bi-box-arrow-up-right me-1"></i>{{ s.url }}</a>
+          <button type="button" class="src-copy-btn" data-url="{{ s.url }}" title="复制链接"><i class="bi bi-clipboard"></i></button>
+        </div>
         {% else %}
         <div class="src-item-url" style="color:var(--warning)"><i class="bi bi-exclamation-triangle me-1"></i>无 URL，需手动导入</div>
         {% endif %}
@@ -72,7 +75,8 @@
         <div class="src-item-foot">
           {% if current_user.has_perm('source:run') %}
           <form method="post" action="{{ url_for('sources.run', sid=s.id) }}" class="src-run-form">
-            <input type="date" name="since" class="form-control form-control-sm" title="起始日期：从该日期翻页抓到今天（留空=仅当前页）">
+            <input type="date" name="since" class="form-control form-control-sm" title="起始日期：从该日期翻页抓到今天（留空=只抓最近的文章，篇数看右边）">
+            <input type="number" name="limit" class="form-control form-control-sm" value="20" min="1" max="500" title="本次最多抓取的篇数（默认 20，留空=用默认）" style="max-width:96px">
             <button type="submit" class="btn btn-sm btn-primary" title="立即抓取（跳过已有）"><i class="bi bi-play-fill"></i> 抓取</button>
             <button type="submit" formaction="{{ url_for('sources.run_overwrite', sid=s.id) }}" class="btn btn-sm btn-outline-primary" title="覆盖抓取（刷新已有）" onclick="return confirm('覆盖抓取：将重新抓取并替换已存在的文章（含 WORD 文件），确认？');">覆盖</button>
           </form>
@@ -129,6 +133,40 @@
     });
     localStorage.setItem(KEY, JSON.stringify(saved));
   };
+})();
+</script>
+
+<script>
+// 复制数据源 URL
+(function () {
+  function copyText(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+      return navigator.clipboard.writeText(text);
+    }
+    var ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.focus(); ta.select();
+    try { document.execCommand('copy'); } catch (e) {}
+    document.body.removeChild(ta);
+    return Promise.resolve();
+  }
+
+  document.querySelectorAll('.src-copy-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var url = btn.getAttribute('data-url');
+      var ico = btn.querySelector('i');
+      copyText(url).then(function () {
+        ico.className = 'bi bi-check-lg';
+        btn.classList.add('is-copied');
+        btn.setAttribute('title', '已复制');
+        setTimeout(function () {
+          ico.className = 'bi bi-clipboard';
+          btn.classList.remove('is-copied');
+          btn.setAttribute('title', '复制链接');
+        }, 1500);
+      });
+    });
+  });
 })();
 </script>
 {% endblock %}

@@ -10,12 +10,17 @@ GenericGovParser 提供基于「CSS 选择器 + 启发式」的默认实现，�
 is_article_link / 标题/正文/作者选择器即可；结构变化时调整局限于单文件。
 """
 import re
+import logging
 from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
+import lxml.html
+from lxml import etree as lxml_etree
 
 from ..utils import ParserError, clean_text, http_get
 from config import MAX_ARTICLES_PER_RUN, MAX_ARTICLES_BACKFILL, MAX_LIST_PAGES
+
+_log = logging.getLogger(__name__)
 
 DATE_RE = re.compile(r"(20\d{2})[-/年.](\d{1,2})[-/月.](\d{1,2})")
 
@@ -54,7 +59,7 @@ class BaseParser:
         except Exception:
             return False
 
-    def fetch_list(self):
+    def fetch_list(self, since_date=None, limit=None):
         raise NotImplementedError
 
     def fetch_detail(self, url):
@@ -112,13 +117,14 @@ class GenericGovParser(BaseParser):
             return f"{y}-{int(mo):02d}-{int(d):02d}"
         return ""
 
-    def fetch_list(self, since_date=None):
+    def fetch_list(self, since_date=None, limit=None):
         """抓取列表。since_date(YYYY-MM-DD) 非空时翻页回溯，跳过早于该日期的条目。
 
         页内/页间假定按日期降序：遇到首条 pub<since_date 即停止翻页。
-        since_date 为 None 时只抓首页、受 MAX_ARTICLES_PER_RUN 约束（旧行为不变）。
+        limit 为本次最多抓取篇数（来自界面输入）；留空则 since_date 用 MAX_ARTICLES_BACKFILL、
+        否则用 MAX_ARTICLES_PER_RUN（默认 20）。since_date 为 None 时只抓首页。
         """
-        cap = MAX_ARTICLES_BACKFILL if since_date else MAX_ARTICLES_PER_RUN
+        cap = limit or (MAX_ARTICLES_BACKFILL if since_date else MAX_ARTICLES_PER_RUN)
         items, seen, stop = [], set(), False
         # 不指定日期只抓首页（保持旧行为）；指定日期才翻页回溯
         page_iter = self.list_page_urls()
@@ -163,6 +169,31 @@ class GenericGovParser(BaseParser):
                 return el
         return None
 
+    def _content_element(self, soup, resp_text):
+        """定位正文容器，返回 BS4 tag 供 _content_to_blocks 处理。
+
+        优先级：source.content_xpath（lxml 求值）> content_selectors（CSS 启发式）。
+        XPath 留空或匹配为空 / 抛错时，记 warning 并回退默认选择器，
+        不让一个写错的 XPath 拖垮整个来源抓取。
+        """
+        xpath = (getattr(self.source, "content_xpath", "") or "").strip()
+        if xpath:
+            try:
+                doc = lxml.html.fromstring(resp_text or "")
+                matches = doc.xpath(xpath)
+                # xpath 可能返回元素 / 文本 / 字符串，只取元素节点
+                el = next((m for m in matches if hasattr(m, "tag")), None)
+                if el is not None:
+                    frag = lxml_etree.tostring(el, encoding="unicode")
+                    node = BeautifulSoup(frag, "lxml")
+                    container = node.body or node
+                    kids = container.find_all(recursive=False)
+                    return kids[0] if len(kids) == 1 else container
+                _log.warning("content_xpath 未匹配到元素，回退默认选择器：%s", xpath)
+            except Exception as e:
+                _log.warning("content_xpath 执行失败，回退默认选择器：%s -> %s", xpath, e)
+        return self._select_first(soup, self.content_selectors)
+
     def fetch_detail(self, url):
         resp = self._get(url)
         soup = BeautifulSoup(resp.text, "lxml")
@@ -170,7 +201,7 @@ class GenericGovParser(BaseParser):
         title_el = self._select_first(soup, self.title_selectors)
         title = clean_text(title_el.get_text()) if title_el else clean_text(soup.title.get_text() if soup.title else "")
 
-        content_el = self._select_first(soup, self.content_selectors)
+        content_el = self._content_element(soup, resp.text)
         blocks = self._content_to_blocks(content_el, base_url=url) if content_el else []
 
         author = ""

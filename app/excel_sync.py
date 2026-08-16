@@ -73,13 +73,16 @@ def read_sources_from_excel(path):
     if not rows:
         return []
 
-    # 定位表头列：新闻(分类) / 栏目(来源名) / 来源(URL) / 备注
+    # 定位表头列：新闻(分类) / 栏目(来源名) / 来源(URL) / 备注 / 抓取配置（可选新列）
     header = rows[0]
     col_idx = {str(h or "").strip(): i for i, h in enumerate(header)}
     i_cat = col_idx.get("新闻") or col_idx.get("分类") or 1
     i_col = col_idx.get("栏目")                 # 栏目列：作为来源名称（可选）
     i_src = col_idx.get("来源") or 2
     i_remark = col_idx.get("备注")              # 备注列（无则为 None，不再误取来源列）
+    i_lx = col_idx.get("列表区域XPath")          # 列表页文章区域 XPath（可选）
+    i_pg = col_idx.get("分页URL模板")            # 翻页 URL 模板（可选）
+    i_rm = col_idx.get("渲染模式")               # static / browser（可选）
 
     def _cell(row, idx):
         return row[idx] if idx is not None and idx < len(row) else None
@@ -105,6 +108,9 @@ def read_sources_from_excel(path):
             "source_type": stype,
             "parser_key": pkey,
             "remark": str(remark or "").strip(),
+            "list_xpath": str(_cell(row, i_lx) or "").strip(),
+            "page_url_pattern": str(_cell(row, i_pg) or "").strip(),
+            "render_mode": str(_cell(row, i_rm) or "").strip(),
         })
     return result
 
@@ -127,12 +133,21 @@ def import_from_excel(path, *, replace=False):
             s.parser_key = r["parser_key"]
             if r["remark"]:
                 s.remark = r["remark"]
+            # 抓取配置：Excel 填写了才覆盖（留空=保留界面手工调整值）
+            if r["list_xpath"]:
+                s.list_xpath = r["list_xpath"]
+            if r["page_url_pattern"]:
+                s.page_url_pattern = r["page_url_pattern"]
+            if r["render_mode"]:
+                s.render_mode = r["render_mode"]
         else:
             author_policy = "各单位" if r["category"] == "单位动态" else ""
             s = Source(
                 category=r["category"], name=r["name"], url=r["url"],
                 source_type=r["source_type"], parser_key=r["parser_key"],
                 author_policy=author_policy, enabled=True, remark=r["remark"],
+                list_xpath=r["list_xpath"], page_url_pattern=r["page_url_pattern"],
+                render_mode=r["render_mode"] or "static",
             )
             db.session.add(s)
             existing[key] = s

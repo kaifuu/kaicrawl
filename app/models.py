@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""数据模型：Source / Task / Article / CrawlLog。"""
+"""数据模型：Source / Task / Article / CrawlLog / CrawlLogLine。"""
 from datetime import datetime
 
 from .extensions import db
@@ -17,6 +17,11 @@ class Source(db.Model):
     parser_key = db.Column(db.String(64), nullable=False)             # 映射到解析器插件
     author_policy = db.Column(db.String(64), default="")              # 单位动态 -> 「各单位」
     content_xpath = db.Column(db.String(255), default="")             # 详情页正文区域 XPath，留空=用解析器默认选择器
+    list_xpath = db.Column(db.String(255), default="")                # 列表页文章列表区域 XPath，留空=解析器默认启发式
+    date_xpath = db.Column(db.String(255), default="")                # 列表项日期 XPath（相对条目容器），留空=启发式
+    meta_xpath = db.Column(db.String(255), default="")                # 详情页「时间+来源」元信息行 XPath，留空=用解析器默认选择器
+    page_url_pattern = db.Column(db.String(255), default="")          # 分页 URL 模板（含 {page}），留空=不翻页
+    render_mode = db.Column(db.String(16), default="static")          # static=HTTP / browser=Playwright 渲染（SPA+反爬）
     enabled = db.Column(db.Boolean, default=True)
     remark = db.Column(db.String(255), default="")
     created_at = db.Column(db.DateTime, default=datetime.now)
@@ -91,6 +96,59 @@ class CrawlLog(db.Model):
 
     def __repr__(self):
         return f"<CrawlLog #{self.id} {self.status}>"
+
+
+class CrawlLogLine(db.Model):
+    """单次抓取的逐条运行日志行（详情页终端实时滚动用）。"""
+    __tablename__ = "crawl_log_lines"
+    __table_args__ = (db.UniqueConstraint("log_id", "seq", name="uq_logline_seq"),)
+
+    id = db.Column(db.Integer, primary_key=True)
+    log_id = db.Column(db.Integer, db.ForeignKey("crawl_logs.id"), nullable=False)
+    seq = db.Column(db.Integer, nullable=False)          # 单次运行内 1,2,3... 递增
+    ts = db.Column(db.DateTime, default=datetime.now)
+    level = db.Column(db.String(8), default="info")      # info/success/warn/error/dim
+    text = db.Column(db.Text, default="")
+
+    def __repr__(self):
+        return f"<CrawlLogLine {self.log_id}/{self.seq}>"
+
+
+class Release(db.Model):
+    """一次 EXE 打包发布记录（网页端「发布管理」发起，后台线程执行 build_exe.py）。"""
+    __tablename__ = "releases"
+
+    id = db.Column(db.Integer, primary_key=True)
+    version = db.Column(db.String(32), nullable=False, index=True)   # 1.0.1
+    channel = db.Column(db.String(16), default="win7")               # win7=正式 / smoke=冒烟验证
+    note = db.Column(db.Text, default="")                            # 更新说明（版本日志）
+    status = db.Column(db.String(16), default="building")            # building / success / failed
+    started_at = db.Column(db.DateTime, default=datetime.now)
+    finished_at = db.Column(db.DateTime)
+    python_ver = db.Column(db.String(32), default="")                # 打包所用 Python 版本
+    dist_dir = db.Column(db.String(255), default="")                 # 产物目录（绝对路径）
+    dist_size = db.Column(db.BigInteger, default=0)                  # 产物目录大小（字节）
+    zip_path = db.Column(db.String(255), default="")                 # 打包 zip（相对项目根）供下载
+    message = db.Column(db.Text, default="")                         # 汇总：成功产物 / 失败原因
+
+    def __repr__(self):
+        return f"<Release v{self.version} {self.channel} {self.status}>"
+
+
+class ReleaseLine(db.Model):
+    """构建过程的逐条输出行（发布页终端实时滚动用）。"""
+    __tablename__ = "release_lines"
+    __table_args__ = (db.UniqueConstraint("release_id", "seq", name="uq_relline_seq"),)
+
+    id = db.Column(db.Integer, primary_key=True)
+    release_id = db.Column(db.Integer, db.ForeignKey("releases.id"), nullable=False)
+    seq = db.Column(db.Integer, nullable=False)              # 单次构建内 1,2,3... 递增
+    ts = db.Column(db.DateTime, default=datetime.now)
+    level = db.Column(db.String(8), default="info")          # info/success/warn/error/dim
+    text = db.Column(db.Text, default="")
+
+    def __repr__(self):
+        return f"<ReleaseLine {self.release_id}/{self.seq}>"
 
 
 # ===== 认证与权限（RBAC） =====

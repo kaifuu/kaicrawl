@@ -4,66 +4,126 @@
 {% block page_icon %}bi bi-file-earmark-text{% endblock %}
 {% block page_desc %}查看已生成 WORD，按分类、来源、日期筛选并下载。{% endblock %}
 {% block content %}
-<form method="get" class="card mb-3"><div class="card-body">
-  <div class="row g-2 align-items-end">
-    <div class="col-md-3">
-      <label class="form-label small">关键词（标题）</label>
-      <input class="form-control" name="q" value="{{ filters.q }}">
-    </div>
-    <div class="col-md-3">
-      <label class="form-label small">分类</label>
-      <select class="form-select" name="category">
-        <option value="">全部</option>
-        {% for c in categories %}<option value="{{ c }}" {{ 'selected' if filters.category==c }}>{{ c }}</option>{% endfor %}
-      </select>
-    </div>
-    <div class="col-md-3">
-      <label class="form-label small">来源</label>
-      <select class="form-select" name="source_id">
-        <option value="">全部</option>
-        {% for s in sources %}<option value="{{ s.id }}" {{ 'selected' if filters.source_id==s.id }}>[{{ s.category }}] {{ s.name }}</option>{% endfor %}
-      </select>
-    </div>
-    <div class="col-md-2">
-      <label class="form-label small">抓取日期</label>
-      <input type="date" class="form-control" name="date" value="{{ filters.date }}">
-    </div>
-    <div class="col-md-1"><button class="btn btn-primary w-100">筛选</button></div>
-  </div>
-</div></form>
 
-<div class="card"><div class="card-body p-0">
-<table class="table table-hover mb-0 align-middle">
-  <thead class="table-light"><tr>
-    <th>标题</th><th>分类</th><th>来源</th><th>作者</th><th>发布日期</th><th>状态</th><th style="width:1%">操作</th>
+<div class="log-filterbar">
+  <form method="get" class="lf-form">
+    <div class="filter-search">
+      <i class="bi bi-search"></i>
+      <input class="form-control form-control-sm" name="q" value="{{ filters.q }}" placeholder="搜索标题" aria-label="搜索标题" onkeydown="if(event.keyCode===13)this.form.submit()">
+    </div>
+    <div class="lf-selects">
+      <label class="lf-field lf-cat" title="按分类筛选">
+        <i class="bi bi-tags"></i>
+        <select name="category" class="form-select form-select-sm" onchange="this.form.submit()">
+          <option value="">全部分类</option>
+          {% for c in categories %}<option value="{{ c }}" {{ 'selected' if filters.category==c }}>{{ c }}</option>{% endfor %}
+        </select>
+      </label>
+      <label class="lf-field lf-src" title="按来源筛选">
+        <i class="bi bi-diagram-3"></i>
+        <select name="source_id" class="form-select form-select-sm" onchange="this.form.submit()">
+          <option value="">全部来源</option>
+          {% for s in sources %}<option value="{{ s.id }}" {{ 'selected' if filters.source_id==s.id }}>[{{ s.category }}] {{ s.name }}</option>{% endfor %}
+        </select>
+      </label>
+      <label class="lf-field lf-day" title="按抓取日期筛选">
+        <i class="bi bi-calendar3"></i>
+        <input type="date" class="form-control form-control-sm" name="date" value="{{ filters.date }}" onchange="this.form.submit()">
+      </label>
+    </div>
+  </form>
+
+  <div class="lf-actions">
+    {% if filters.q or filters.category or filters.source_id or filters.date %}
+    <a class="lf-reset" href="{{ url_for('articles.index') }}" title="清除所有筛选"><i class="bi bi-x-lg"></i> 重置</a>
+    {% endif %}
+    <button class="btn-icon" type="button" onclick="location.reload()" title="刷新"><i class="bi bi-arrow-clockwise"></i></button>
+    {% if pagination.total %}
+    <button class="btn btn-sm btn-outline-danger" type="button" data-bs-toggle="modal" data-bs-target="#clearModal"
+            title="清空全部文章记录，可选择是否删除文件"><i class="bi bi-eraser"></i> 清空</button>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card"><div class="card-body table-card">
+<table class="table table-sm table-hover mb-0 align-middle art-table">
+  <thead><tr>
+    <th class="art-idx-head">#</th>
+    <th><i class="bi bi-text-paragraph"></i> 标题</th>
+    <th>分类</th>
+    <th>来源</th>
+    <th>作者</th>
+    <th><i class="bi bi-calendar3"></i> 发布日期</th>
+    <th>状态</th>
+    <th class="text-end" style="width:1%">操作</th>
   </tr></thead>
   <tbody>
   {% for a in articles %}
     <tr>
-      <td class="small" style="max-width:360px">{{ a.title }}
-        <div class="small-muted">{{ a.docx_path }}</div>
+      <td class="art-idx">{{ (pagination.page - 1) * pagination.per_page + loop.index }}</td>
+      <td class="art-title-cell">
+        <span class="art-title" title="{{ a.title }}">{{ a.title }}</span>
       </td>
-      <td>{{ a.source.category if a.source else '' }}</td>
-      <td class="small">{{ a.source.name if a.source else '' }}</td>
-      <td class="small">{{ a.author or '—' }}</td>
-      <td class="small-muted">{{ a.publish_date or a.crawled_at.strftime('%Y-%m-%d') }}</td>
-      <td>{% if a.status=='ok' %}<span class="badge bg-success">已生成</span>{% else %}<span class="badge bg-danger">失败</span>{% endif %}</td>
+      <td>{% if a.source %}<span class="art-chip">{{ a.source.category }}</span>{% else %}<span class="small-muted">—</span>{% endif %}</td>
+      <td class="art-src">{{ a.source.name if a.source else '—' }}</td>
+      <td class="art-author">{{ a.author or '—' }}</td>
+      <td class="art-date">{{ a.publish_date or a.crawled_at.strftime('%Y-%m-%d') }}</td>
       <td>
+        {% if a.status=='ok' %}<span class="log-badge is-success"><i class="bi bi-check-circle-fill"></i> 已生成</span>
+        {% else %}<span class="log-badge is-error"><i class="bi bi-x-circle-fill"></i> 失败</span>{% endif %}
+      </td>
+      <td class="text-end">
         {% if a.status=='ok' and a.docx_path %}
-        <div class="btn-group btn-group-sm">
-          <a class="btn btn-outline-primary" href="{{ url_for('articles.download', aid=a.id) }}">下载</a>
-          <a class="btn btn-outline-secondary" href="{{ url_for('articles.open_folder', aid=a.id) }}">打开目录</a>
+        <div class="art-actions">
+          <a class="btn-icon" href="{{ url_for('articles.download', aid=a.id) }}" title="下载 WORD"><i class="bi bi-download"></i></a>
+          <a class="btn-icon" href="{{ url_for('articles.open_folder', aid=a.id) }}" title="打开所在目录"><i class="bi bi-folder2-open"></i></a>
         </div>
         {% else %}<span class="small-muted">—</span>{% endif %}
       </td>
     </tr>
   {% else %}
-    <tr><td colspan="7" class="empty-state"><span class="es-ico"><i class="bi bi-inbox"></i></span><span class="es-msg">暂无文章。可在数据源管理点击「抓取」，或使用手动导入。</span></td></tr>
+    <tr><td colspan="8" class="empty-state"><span class="es-ico"><i class="bi bi-inbox"></i></span><span class="es-msg">暂无文章。可在数据源管理点击「抓取」，或使用手动导入。</span></td></tr>
   {% endfor %}
   </tbody>
 </table>
 </div></div>
 {{ render_pagination(pagination, 'articles.index', {'q': filters.q, 'category': filters.category, 'source_id': filters.source_id, 'date': filters.date}) }}
 
-<p class="small-muted mt-2">WORD 输出根目录：data/output/分类/YYYY-MM-DD/标题.docx</p>
+<p class="small-muted mt-2"><i class="bi bi-info-circle"></i> WORD 输出根目录：data/output/分类/YYYY-MM-DD/标题.docx</p>
+
+{# 清空弹窗：可选择是否连带删除 data/output 下的文件 #}
+<div class="modal fade" id="clearModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <form method="post" action="{{ url_for('articles.clear_all') }}">
+        <div class="modal-header">
+          <h5 class="modal-title"><i class="bi bi-eraser me-2"></i>清空文章</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+        </div>
+        <div class="modal-body">
+          <p class="small-muted">即将清空全部 <b>{{ pagination.total }}</b> 篇文章记录，此操作不可恢复。请选择文件处理方式：</p>
+          <div class="form-check mb-2">
+            <input class="form-check-input" type="radio" name="mode" value="records" id="clearRecords">
+            <label class="form-check-label" for="clearRecords">仅清空文章记录
+              <span class="d-block small-muted">保留 data/output 下全部文件</span></label>
+          </div>
+          <div class="form-check mb-2">
+            <input class="form-check-input" type="radio" name="mode" value="tracked" id="clearTracked" checked>
+            <label class="form-check-label" for="clearTracked">同时删除已生成的文件
+              <span class="d-block small-muted">删除各文章的 WORD 与配套图片</span></label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="radio" name="mode" value="all" id="clearAll">
+            <label class="form-check-label text-danger" for="clearAll">彻底清空 output 目录
+              <span class="d-block small-muted">删除 data/output 下全部文件，含未入库文件</span></label>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">取消</button>
+          <button type="submit" class="btn btn-danger"><i class="bi bi-eraser me-1"></i>确定清空</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
 {% endblock %}

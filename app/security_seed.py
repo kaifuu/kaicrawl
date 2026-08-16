@@ -26,6 +26,9 @@ MENU_DEFS = [
     ("手动导入", "article_import", "menu", "articles.manual_import", "📥", "", None, 5),
     ("URL 批量导入", "article_url_import", "menu", "articles.import_urls", "🔗", "", None, 6),
     ("运行日志", "log", "menu", "logs.index", "📜", "", None, 7),
+    ("发布管理", "release", "menu", "releases.index", "📦", "", None, 8),
+    ("发布-构建", "release:build", "button", "", "", "release:build", "release", 1),
+    ("发布-删除", "release:delete", "button", "", "", "release:delete", "release", 2),
 
     ("系统管理", "system", "directory", "", "⚙️", "", None, 99),
     ("人员管理", "user", "menu", "admin.users", "👥", "", "system", 1),

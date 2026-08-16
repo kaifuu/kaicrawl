@@ -44,6 +44,43 @@
       <input class="form-control" name="author_policy"
              value="{{ source.author_policy if source else '' }}" placeholder="单位动态填 各单位，否则留空">
     </div>
+    <div class="col-md-3">
+      <label class="form-label">渲染模式</label>
+      <select class="form-select" name="render_mode">
+        {% set cur_mode = source.render_mode if source and source.render_mode else 'static' %}
+        <option value="static" {{ 'selected' if cur_mode=='static' }}>static（普通 HTTP）</option>
+        <option value="browser" {{ 'selected' if cur_mode=='browser' }}>browser（无头浏览器）</option>
+      </select>
+      <div class="form-text">JS 渲染/反爬站点（如学习强国）选 browser，用无头 Chromium 渲染后解析；需已安装 playwright。</div>
+    </div>
+    <div class="col-12">
+      <label class="form-label">列表页文章区域 XPath</label>
+      <input class="form-control" name="list_xpath"
+             value="{{ source.list_xpath if source else '' }}"
+             placeholder="可选，如 /html/body/div[8] 或 //div[@class='news-list']">
+      <div class="form-text">可选。列表页文章列表区域的 XPath（浏览器 F12 → Copy full XPath），设置后<strong>只提取区域内链接</strong>、跳过导航等干扰，新站点零代码接入。留空则用解析器默认启发式。</div>
+    </div>
+    <div class="col-md-6">
+      <label class="form-label">列表项日期 XPath</label>
+      <input class="form-control" name="date_xpath"
+             value="{{ source.date_xpath if source else '' }}"
+             placeholder="可选，相对条目容器，如 ./span[@class='date']">
+      <div class="form-text">可选。留空则从条目容器文本自动识别日期（兼容 2026-08-14 与 [2026年08月14日] 两种格式）。</div>
+    </div>
+    <div class="col-md-6">
+      <label class="form-label">分页 URL 模板</label>
+      <input class="form-control" name="page_url_pattern"
+             value="{{ source.page_url_pattern if source else '' }}"
+             placeholder="可选，如 index_{page}.html 或 list_50765_{page}.html">
+      <div class="form-text">可选。列表跨页时填写，{page} 从 1 起，可为相对路径；按日期抓取时自动翻页直到覆盖起始日期。</div>
+    </div>
+    <div class="col-12">
+      <label class="form-label">详情页时间/来源行 XPath</label>
+      <input class="form-control" name="meta_xpath"
+             value="{{ source.meta_xpath if source else '' }}"
+             placeholder="可选，如 /html/body/div[7]/div[1]/div/p[2]">
+      <div class="form-text">可选。文章页「时间 + 来源」元信息行（如「日期：2026-08-12 16:28 来源：东城区审计局」）的 XPath，设置后优先从中抽取发布日期与作者（来源即作者）。留空则用解析器默认选择器；未命中自动回退，不影响抓取。</div>
+    </div>
     <div class="col-12">
       <label class="form-label">详情页正文区域 XPath</label>
       <input class="form-control" name="content_xpath"

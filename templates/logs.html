@@ -44,50 +44,290 @@
 </div>
 
 {% set running = logs|selectattr('status','equalto','running')|list %}
-{% set has_running = running|length > 0 %}
 <div class="card"><div class="card-body p-0">
 <table class="table table-sm table-hover mb-0 align-middle logs-table">
   <thead><tr>
-    <th>#</th><th>来源</th><th>触发</th><th>状态</th><th>新增/总数</th><th>开始时间</th><th>耗时</th><th>消息</th>{% if has_running %}<th class="text-end" style="width:1%">操作</th>{% endif %}
+    <th>#</th>
+    <th><i class="bi bi-diagram-3"></i> 来源</th>
+    <th>触发</th>
+    <th>状态</th>
+    <th>新增/总数</th>
+    <th><i class="bi bi-calendar3"></i> 开始时间</th>
+    <th>耗时</th>
+    <th>消息</th>
+    <th class="text-end" style="width:1%">操作</th>
   </tr></thead>
   <tbody>
   {% for l in logs %}
     <tr class="log-row log-{{ l.status }}">
-      <td class="small-muted">{{ l.id }}</td>
+      <td class="log-id">{{ l.id }}</td>
       <td>
-        {% if l._source %}{{ l._source.name }}<div class="small-muted">{{ l._source.category }}</div>{% else %}<span class="small-muted">—</span>{% endif %}
+        {% if l._source %}
+        <div class="log-src-name"><a class="log-src-link" href="{{ l._source.url }}" target="_blank" rel="noopener noreferrer" title="打开源页面：{{ l._source.url }}">{{ l._source.name }}<i class="bi bi-box-arrow-up-right"></i></a></div>
+        <div class="log-src-cat">{{ l._source.category }}</div>
+        {% else %}<span class="small-muted">—</span>{% endif %}
       </td>
-      <td>{% if l.task_id %}<span class="badge bg-primary">定时</span>{% else %}<span class="badge bg-secondary">手动</span>{% endif %}</td>
+      <td>{% if l.task_id %}<span class="log-trigger t-cron"><i class="bi bi-clock-history"></i> 定时</span>{% else %}<span class="log-trigger t-manual"><i class="bi bi-hand-index-thumb"></i> 手动</span>{% endif %}</td>
       <td>
-        {% if l.status == 'success' %}<span class="badge bg-success"><i class="bi bi-check-circle"></i> 成功</span>
-        {% elif l.status == 'error' %}<span class="badge bg-danger"><i class="bi bi-x-circle"></i> 失败</span>
-        {% elif l.status == 'running' %}<span class="badge is-running"><span class="dot"></span> 运行中</span>
-        {% elif l.status == 'stopped' %}<span class="badge bg-warning"><i class="bi bi-stop-circle"></i> 已停止</span>
-        {% else %}<span class="badge bg-secondary">{{ l.status }}</span>{% endif %}
+        {% if l.status == 'success' %}<span class="log-badge is-success"><i class="bi bi-check-circle-fill"></i> 成功</span>
+        {% elif l.status == 'error' %}<span class="log-badge is-error"><i class="bi bi-x-circle-fill"></i> 失败</span>
+        {% elif l.status == 'running' %}<span class="log-badge is-running"><span class="dot"></span> 运行中</span>
+        {% elif l.status == 'stopped' %}<span class="log-badge is-stopped"><i class="bi bi-stop-circle-fill"></i> 已停止</span>
+        {% else %}<span class="log-badge is-other">{{ l.status }}</span>{% endif %}
       </td>
-      <td><b>{{ l.new_count }}</b><span class="small-muted">/{{ l.total_count }}</span></td>
-      <td class="small-muted">{{ l.started_at.strftime('%m-%d %H:%M:%S') if l.started_at else '' }}</td>
-      <td class="small-muted">{% if l.started_at and l.finished_at %}{{ (l.finished_at - l.started_at).seconds }}s{% else %}—{% endif %}</td>
-      <td class="small msg-cell" title="{{ l.message }}">{{ l.message }}</td>
-      {% if has_running %}<td class="text-end">
+      <td><span class="log-new">{{ l.new_count }}</span><span class="log-total">/{{ l.total_count }}</span></td>
+      <td class="log-time">{{ l.started_at.strftime('%m-%d %H:%M:%S') if l.started_at else '—' }}</td>
+      <td class="log-dur">{% if l.started_at and l.finished_at %}<i class="bi bi-stopwatch"></i>{{ (l.finished_at - l.started_at).seconds }}s{% else %}—{% endif %}</td>
+      <td class="msg-cell" title="{{ l.message }}">{{ l.message }}</td>
+      <td class="text-end log-actions">
+        <a class="btn-icon" href="{{ url_for('logs.detail', log_id=l.id) }}" title="详情：运行统计与实时日志">
+          <i class="bi bi-terminal"></i>
+        </a>
+        <button class="btn-icon log-files-btn" type="button"
+                data-log-id="{{ l.id }}" data-log-name="{{ l._source.name if l._source else '' }}"
+                title="文件：浏览并下载本次抓取生成的文件">
+          <i class="bi bi-folder2-open"></i>
+        </button>
+        <button class="btn-icon log-open-btn" type="button" data-log-id="{{ l.id }}"
+                title="打开文件夹：定位本次抓取的输出目录">
+          <i class="bi bi-folder-symlink"></i>
+        </button>
         {% if l.status == 'running' %}
         <form method="post" action="{{ url_for('logs.stop') }}" onsubmit="return confirm('停止该抓取任务？将在当前文章处理完成后停止。');" style="display:inline">
           <input type="hidden" name="log_id" value="{{ l.id }}">
-          <button class="btn btn-sm btn-outline-danger" title="停止运行中的任务"><i class="bi bi-stop-circle"></i> 停止</button>
+          <button class="btn-icon is-danger" title="停止运行中的任务"><i class="bi bi-stop-circle"></i></button>
         </form>
-        {% else %}<span class="small-muted">—</span>{% endif %}
-      </td>{% endif %}
+        {% endif %}
+      </td>
     </tr>
   {% else %}
-    <tr><td colspan="{{ 9 if has_running else 8 }}" class="empty-state"><span class="es-ico"><i class="bi bi-journal-x"></i></span><span class="es-msg">暂无日志</span></td></tr>
+    <tr><td colspan="9" class="empty-state"><span class="es-ico"><i class="bi bi-journal-x"></i></span><span class="es-msg">暂无日志</span></td></tr>
   {% endfor %}
   </tbody>
 </table>
 </div></div>
 {{ render_pagination(pagination, 'logs.index', {'source_id': source_id or '', 'status': status or '', 'q': q or '', 'per_page': per_page}, per_page=per_page, per_page_options=per_page_options) }}
 
-{# 有运行中的任务时自动刷新，便于观察进度 #}
+{# ===== 本次抓取生成文件：浏览 / 下载（清单式 + 分页） ===== #}
+<div class="modal fade" id="filesModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content lfm-content">
+      <div class="modal-header lfm-header">
+        <div class="lfm-title">
+          <span class="lfm-title-ico"><i class="bi bi-folder2-open"></i></span>
+          <div class="lfm-title-txt">
+            <h5 class="modal-title">本次抓取生成的文件</h5>
+            <span id="lf-sub" class="lfm-sub"></span>
+          </div>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body lfm-body">
+        <div id="lf-list" class="lfm-list"></div>
+        <div id="lf-empty" class="lf-empty" hidden>
+          <i class="bi bi-inbox"></i>
+          <span>本次抓取没有生成文件（列表为空 / 全部跳过 / 均失败）</span>
+        </div>
+      </div>
+      <div class="modal-footer lfm-footer">
+        <div class="lfm-pager">
+          <span id="lf-pginfo" class="pg-info"></span>
+          <ul id="lf-pager" class="pagination pagination-sm mb-0"></ul>
+        </div>
+        <div class="lfm-foot-right">
+          <label class="lfm-perpage">
+            <span class="pg-perpage-label">每页</span>
+            <select id="lf-perpage" class="form-select form-select-sm pg-perpage-sel" title="每页显示条数">
+              <option value="10">10</option>
+              <option value="20">20</option>
+              <option value="50">50</option>
+            </select>
+            <span class="pg-perpage-label">条</span>
+          </label>
+          <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">关闭</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var listEl = document.getElementById('lf-list');
+  var emptyEl = document.getElementById('lf-empty');
+  var subEl = document.getElementById('lf-sub');
+  var pgInfoEl = document.getElementById('lf-pginfo');
+  var pagerEl = document.getElementById('lf-pager');
+  var perPageSel = document.getElementById('lf-perpage');
+  var modal = null;
+  var state = { logId: null, logName: '', page: 1, perPage: 10 };
+
+  function fmtSize(b) {
+    if (b == null) return '—';
+    if (b < 1024) return b + ' B';
+    if (b < 1024 * 1024) return (b / 1024).toFixed(1) + ' KB';
+    return (b / 1024 / 1024).toFixed(1) + ' MB';
+  }
+
+  function el(tag, cls, text) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+
+  function renderList(d) {
+    listEl.innerHTML = '';
+    emptyEl.hidden = d.count > 0;
+    d.files.forEach(function (f) {
+      var row = el('div', 'lfm-row');
+
+      var ico = el('span', 'lfm-ico');
+      ico.innerHTML = '<i class="bi bi-file-earmark-word-fill"></i>';
+      row.appendChild(ico);
+
+      var main = el('div', 'lfm-main');
+      var t = el('div', 'lfm-t', f.title); t.title = f.title;
+      main.appendChild(t);
+      var meta = el('div', 'lfm-meta');
+      if (f.file) { var fn = el('span', 'lfm-file', f.file); fn.title = f.file; meta.appendChild(fn); }
+      if (f.publish_date) { meta.appendChild(el('span', 'lfm-dot', '·')); meta.appendChild(el('span', null, f.publish_date)); }
+      meta.appendChild(el('span', 'lfm-dot', '·'));
+      meta.appendChild(el('span', 'lfm-size', fmtSize(f.size)));
+      main.appendChild(meta);
+      row.appendChild(main);
+
+      var a = document.createElement('a');
+      a.className = 'btn-icon lfm-dl';
+      a.href = '{{ url_for("articles.index") }}' + f.aid + '/download';
+      a.title = '下载 WORD';
+      a.innerHTML = '<i class="bi bi-download"></i>';
+      row.appendChild(a);
+
+      listEl.appendChild(row);
+    });
+  }
+
+  // 与 _pagination.html 宏一致：首尾各 1 页、当前页 ±2，间隔折叠为 …
+  function pageSeq(cur, pages) {
+    var out = [], last = 0;
+    function want(p) {
+      if (p < 1 || p > pages) return;
+      if (p > last + 1) out.push(null);
+      out.push(p); last = p;
+    }
+    want(1);
+    for (var p = cur - 2; p <= cur + 2; p++) if (p > 1 && p < pages) want(p);
+    want(pages);
+    return out;
+  }
+
+  function renderPager(d) {
+    pagerEl.innerHTML = '';
+    pgInfoEl.textContent = d.pages > 1
+      ? '共 ' + d.count + ' 个 · 第 ' + d.page + '/' + d.pages + ' 页'
+      : (d.count ? '共 ' + d.count + ' 个' : '');
+    if (d.pages <= 1) return;
+    function item(label, page, opts) {
+      opts = opts || {};
+      var li = el('li', 'page-item' + (opts.disabled ? ' disabled' : '') + (opts.active ? ' active' : ''));
+      var a = el('a', 'page-link'); a.innerHTML = label;
+      if (!opts.disabled && !opts.active) {
+        a.href = '#';
+        a.addEventListener('click', function (e) {
+          e.preventDefault();
+          state.page = page;
+          load();
+        });
+      }
+      li.appendChild(a);
+      pagerEl.appendChild(li);
+    }
+    item('<i class="bi bi-chevron-left"></i>', d.page - 1, { disabled: d.page <= 1 });
+    pageSeq(d.page, d.pages).forEach(function (p) {
+      if (p == null) item('…', p, { disabled: true });
+      else item(String(p), p, { active: p === d.page });
+    });
+    item('<i class="bi bi-chevron-right"></i>', d.page + 1, { disabled: d.page >= d.pages });
+  }
+
+  function load() {
+    subEl.textContent = state.logName || '';
+    listEl.innerHTML = '';
+    emptyEl.hidden = true;
+    pgInfoEl.textContent = ''; pagerEl.innerHTML = '';
+    listEl.appendChild(el('div', 'lfm-loading', '加载中…'));
+    fetch('/logs/' + state.logId + '/files?page=' + state.page + '&per_page=' + state.perPage,
+          { headers: { 'X-Requested-With': 'fetch' } })
+      .then(function (res) { if (!res.ok) throw new Error(res.status); return res.json(); })
+      .then(function (d) {
+        subEl.textContent = (state.logName ? state.logName + ' · ' : '')
+          + '共 ' + d.count + ' 个文件'
+          + (d.total_size ? ' · 合计 ' + fmtSize(d.total_size) : '');
+        renderList(d);
+        renderPager(d);
+      })
+      .catch(function () {
+        listEl.innerHTML = '';
+        emptyEl.hidden = false;
+        emptyEl.querySelector('span').textContent = '加载失败，请重试';
+      });
+  }
+
+  perPageSel.addEventListener('change', function () {
+    state.perPage = parseInt(perPageSel.value, 10) || 10;
+    state.page = 1;
+    load();
+  });
+
+  document.querySelectorAll('.log-files-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      if (!modal) modal = new bootstrap.Modal(document.getElementById('filesModal'));
+      state.logId = btn.getAttribute('data-log-id');
+      state.logName = btn.getAttribute('data-log-name') || '';
+      state.page = 1;
+      perPageSel.value = String(state.perPage);
+      load();
+      modal.show();
+    });
+  });
+
+  openBtns();
+
+  function openBtns() {
+    document.querySelectorAll('.log-open-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var ico = btn.querySelector('i');
+        fetch('/logs/' + btn.getAttribute('data-log-id') + '/open', { headers: { 'X-Requested-With': 'fetch' } })
+          .then(function (res) { return res.json(); })
+          .then(function (d) {
+            var ok = d && d.ok;
+            ico.className = ok ? 'bi bi-check-lg' : 'bi bi-x-lg';
+            btn.classList.add(ok ? 'is-opened' : 'is-danger');
+            btn.setAttribute('title', ok ? '已打开输出目录' : '打开失败');
+            setTimeout(function () {
+              ico.className = 'bi bi-folder-symlink';
+              btn.classList.remove('is-opened', 'is-danger');
+              btn.setAttribute('title', '打开文件夹：定位本次抓取的输出目录');
+            }, 1500);
+          })
+          .catch(function () {
+            ico.className = 'bi bi-x-lg';
+            setTimeout(function () { ico.className = 'bi bi-folder-symlink'; }, 1500);
+          });
+      });
+    });
+  }
+})();
+</script>
+
+{# 有运行中的任务时自动刷新，便于观察进度；文件弹窗打开期间暂缓刷新 #}
 {% if running %}
-<script>setTimeout(function(){ location.reload(); }, 8000);</script>
+<script>(function retry(){
+  setTimeout(function(){
+    if (document.querySelector('#filesModal.show')) { retry(); return; }
+    location.reload();
+  }, 8000);
+})();</script>
 {% endif %}
 {% endblock %}

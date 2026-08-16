@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+{% block title %}日志详情 #{{ log.id }} · KaiCrawl{% endblock %}
+{% block header %}日志详情 #{{ log.id }}{% endblock %}
+{% block page_icon %}bi bi-terminal{% endblock %}
+{% block page_desc %}运行统计与逐条实时日志；运行中的任务自动刷新滚动，历史运行可完整回放。{% endblock %}
+{% block page_actions %}
+<a class="btn btn-sm btn-outline-secondary" href="{{ url_for('logs.index') }}"><i class="bi bi-arrow-left me-1"></i>返回列表</a>
+<a class="btn btn-sm btn-outline-primary" href="{{ url_for('logs.download', log_id=log.id) }}"><i class="bi bi-download me-1"></i>下载日志</a>
+{% if log.status == 'running' %}
+<form method="post" action="{{ url_for('logs.stop') }}" onsubmit="return confirm('停止该抓取任务？将在当前文章处理完成后停止。');" class="d-inline">
+  <input type="hidden" name="log_id" value="{{ log.id }}">
+  <button class="btn btn-sm btn-outline-danger"><i class="bi bi-stop-circle me-1"></i>停止</button>
+</form>
+{% endif %}
+{% endblock %}
+
+{% block content %}
+
+{# ===== 运行统计 ===== #}
+<div class="card detail-card"><div class="card-body">
+  <div class="detail-stats">
+    <div class="ds-item">
+      <div class="ds-label">来源</div>
+      <div class="ds-value">{% if source %}[{{ source.category }}] {{ source.name }}{% else %}—{% endif %}</div>
+    </div>
+    <div class="ds-item">
+      <div class="ds-label">触发</div>
+      <div class="ds-value">{% if log.task_id %}<span class="log-trigger t-cron"><i class="bi bi-clock-history"></i> 定时</span>{% else %}<span class="log-trigger t-manual"><i class="bi bi-hand-index-thumb"></i> 手动</span>{% endif %}</div>
+    </div>
+    <div class="ds-item">
+      <div class="ds-label">状态</div>
+      <div class="ds-value" id="d-badge">{% if log.status == 'success' %}<span class="log-badge is-success"><i class="bi bi-check-circle-fill"></i> 成功</span>
+      {% elif log.status == 'error' %}<span class="log-badge is-error"><i class="bi bi-x-circle-fill"></i> 失败</span>
+      {% elif log.status == 'running' %}<span class="log-badge is-running"><span class="dot"></span> 运行中</span>
+      {% elif log.status == 'stopped' %}<span class="log-badge is-stopped"><i class="bi bi-stop-circle-fill"></i> 已停止</span>
+      {% else %}<span class="log-badge is-other">{{ log.status }}</span>{% endif %}</div>
+    </div>
+    <div class="ds-item">
+      <div class="ds-label">新增 / 总数</div>
+      <div class="ds-value" id="d-counts"><span class="log-new">{{ log.new_count }}</span><span class="log-total">/{{ log.total_count }}</span></div>
+    </div>
+    <div class="ds-item">
+      <div class="ds-label">开始时间</div>
+      <div class="ds-value">{{ log.started_at.strftime('%Y-%m-%d %H:%M:%S') if log.started_at else '—' }}</div>
+    </div>
+    <div class="ds-item">
+      <div class="ds-label">耗时</div>
+      <div class="ds-value" id="d-elapsed"><i class="bi bi-stopwatch"></i>
+        {% if log.started_at %}{{ ((log.finished_at or log.started_at) - log.started_at).total_seconds() | int }}s{% else %}—{% endif %}</div>
+    </div>
+  </div>
+  <div class="detail-msg" id="d-message">{{ log.message or '（等待运行结果…）' }}</div>
+</div></div>
+
+{# ===== 终端式实时日志 ===== #}
+<div class="console-card">
+  <div class="console-head">
+    <span class="console-dots"><i></i><i></i><i></i></span>
+    <span class="console-title">实时日志 · run #{{ log.id }}</span>
+    <span id="console-state" class="console-state">{% if log.status == 'running' %}监听中…{% else %}已结束{% endif %}</span>
+    <button id="console-clear" class="btn-icon" type="button" title="清屏（不影响日志记录）"><i class="bi bi-eraser"></i></button>
+  </div>
+  <div class="console-wrap">
+    <div id="console-body" class="console-body"></div>
+    <button id="console-resume" class="console-resume" type="button" hidden><i class="bi bi-arrow-down-short"></i> 回到底部</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  var body = document.getElementById('console-body');
+  var resumeBtn = document.getElementById('console-resume');
+  var stateEl = document.getElementById('console-state');
+  var lastSeq = 0;
+  var running = {{ 'true' if log.status == 'running' else 'false' }};
+  var autoScroll = true;
+  var firstPoll = true;
+  var timer = null;
+  var cursor = null;
+
+  var BADGES = {
+    success: ['is-success', '<i class="bi bi-check-circle-fill"></i> 成功'],
+    error:   ['is-error', '<i class="bi bi-x-circle-fill"></i> 失败'],
+    running: ['is-running', '<span class="dot"></span> 运行中'],
+    stopped: ['is-stopped', '<i class="bi bi-stop-circle-fill"></i> 已停止']
+  };
+
+  function fmtElapsed(sec) {
+    if (sec < 60) return sec + 's';
+    return Math.floor(sec / 60) + 'm' + (sec % 60) + 's';
+  }
+
+  function ensureCursor() {
+    if (!cursor) {
+      cursor = document.createElement('div');
+      cursor.className = 'console-line console-live';
+      cursor.textContent = '▍';
+      body.appendChild(cursor);
+    }
+  }
+
+  function appendLine(l) {
+    var div = document.createElement('div');
+    div.className = 'console-line lv-' + (l.level || 'info');
+    var t = document.createElement('span');
+    t.className = 'cl-time';
+    t.textContent = l.ts || '';
+    div.appendChild(t);
+    div.appendChild(document.createTextNode(l.text || ''));
+    if (cursor) body.insertBefore(div, cursor); else body.appendChild(div);
+  }
+
+  function scrollBottom() {
+    body.scrollTop = body.scrollHeight;
+  }
+
+  function updateHeader(d) {
+    var badgeBox = document.getElementById('d-badge');
+    var b = BADGES[d.status];
+    if (b) badgeBox.innerHTML = '<span class="log-badge ' + b[0] + '">' + b[1] + '</span>';
+    document.getElementById('d-counts').innerHTML =
+      '<span class="log-new">' + d.new_count + '</span><span class="log-total">/' + d.total_count + '</span>';
+    document.getElementById('d-elapsed').innerHTML =
+      '<i class="bi bi-stopwatch"></i> ' + fmtElapsed(d.elapsed_seconds);
+    var msg = document.getElementById('d-message');
+    if (d.message) msg.textContent = d.message;
+  }
+
+  function stopPolling(d) {
+    running = false;
+    if (timer) { clearInterval(timer); timer = null; }
+    if (cursor) { cursor.remove(); cursor = null; }
+    stateEl.textContent = d && d.finished_at ? ('已结束 · ' + d.finished_at) : '已结束';
+    autoScroll = true; resumeBtn.hidden = true;
+    scrollBottom();
+  }
+
+  function poll() {
+    fetch('{{ url_for("logs.lines", log_id=log.id) }}?after=' + lastSeq, { headers: { 'X-Requested-With': 'fetch' } })
+      .then(function (res) {
+        if (res.status === 404) { stopPolling(null); return null; }  // 日志被清空，停止轮询
+        return res.json();
+      })
+      .then(function (d) {
+        if (!d) return;
+        lastSeq = d.last_seq;
+        for (var i = 0; i < d.lines.length; i++) appendLine(d.lines[i]);
+        if (firstPoll && d.lines.length === 0 && d.finished && lastSeq === 0) {
+          var note = { ts: '', level: 'dim', text: '（无详细日志：该次运行早于日志详情功能上线）' };
+          appendLine(note);
+        }
+        firstPoll = false;
+        updateHeader(d);
+        if (d.finished) { stopPolling(d); return; }
+        ensureCursor();
+        if (autoScroll) scrollBottom();
+      })
+      .catch(function () { /* 瞬时网络异常，保活轮询 */ });
+  }
+
+  body.addEventListener('scroll', function () {
+    autoScroll = body.scrollHeight - body.scrollTop - body.clientHeight < 40;
+    resumeBtn.hidden = autoScroll;
+  });
+  resumeBtn.addEventListener('click', function () {
+    autoScroll = true; resumeBtn.hidden = true; scrollBottom();
+  });
+  document.getElementById('console-clear').addEventListener('click', function () {
+    body.innerHTML = '';
+    cursor = null;
+    if (running) ensureCursor();
+  });
+
+  poll();
+  if (running) timer = setInterval(poll, 1500);
+  else stopPolling(null);
+})();
+</script>
+{% endblock %}

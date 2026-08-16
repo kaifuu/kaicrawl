@@ -4,18 +4,22 @@
 规范：
   标题：加粗 / 宋体 / 五号(10.5pt) / 居中 / 单倍行距
   正文：首行空两格 / 宋体 / 五号 / 左对齐 / 单倍行距
-  作者：单位动态 -> 「各单位」；其他用原作者或无
+  作者：单位动态 -> 「各单位」；其他用原作者（文章页「来源：xxx」抽取值亦计入作者）
   图片：png/jpg，按原文位置插入，并单独保存到当天目录的 images 子目录
 """
+import base64
 import os
+from concurrent.futures import ThreadPoolExecutor
 
 from docx import Document
-from docx.shared import Pt, Inches
+from docx.shared import Pt, Inches, Emu
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
+from PIL import Image
 
-from config import OUTPUT_DIR, FONT_NAME, FONT_SIZE_PT
+from config import (OUTPUT_DIR, FONT_NAME, FONT_SIZE_PT, IMAGE_WORKERS,
+                    IMAGE_WIDTH_RATIO, IMAGE_HEIGHT_RATIO)
 from .utils import safe_filename, unique_path, ParserError
 from .utils import http_get
 
@@ -102,16 +106,54 @@ def _add_body_text(doc, text):
     return p
 
 
+def _fit_image_inches(path, max_w, max_h):
+    """按图片原生像素/DPI 求英寸尺寸，等比缩到 (max_w, max_h) 内，只缩不放。
+
+    DPI 异常（如 1 或 600+，常见于某些截图工具）时按 96 处理。
+    """
+    with Image.open(path) as im:
+        px_w, px_h = im.size
+        try:
+            dpi_x, dpi_y = im.info.get("dpi", (96, 96))
+        except Exception:
+            dpi_x = dpi_y = 96
+        if not 24 <= dpi_x <= 600:
+            dpi_x = 96
+        if not 24 <= dpi_y <= 600:
+            dpi_y = 96
+    w, h = px_w / dpi_x, px_h / dpi_y
+    if w <= 0 or h <= 0:
+        return max_w, max_w * 0.6
+    scale = min(max_w / w, max_h / h, 1.0)
+    return w * scale, h * scale
+
+
 def _add_image(doc, local_path):
+    """居中插图：尺寸按本页可用区域的比例约束（宽 65% / 高 55%），不拉满整页。"""
     p = doc.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     _set_single_spacing(p)
     run = p.add_run()
     try:
-        run.add_picture(local_path, width=Inches(5.2))
+        sec = doc.sections[0]
+        # Length 相减返回裸 EMU int，需包回 Emu 再取英寸
+        avail_w = Emu(sec.page_width - sec.left_margin - sec.right_margin).inches
+        avail_h = Emu(sec.page_height - sec.top_margin - sec.bottom_margin).inches
+        w, h = _fit_image_inches(local_path,
+                                 avail_w * IMAGE_WIDTH_RATIO,
+                                 avail_h * IMAGE_HEIGHT_RATIO)
+        run.add_picture(local_path, width=Inches(w), height=Inches(h))
     except Exception:
         run.add_text("[图片插入失败]")
     return p
+
+
+def _decode_data_url(url):
+    """解码 data:image/png;base64,xxx 形式的内嵌图片，返回 (bytes, mime)。"""
+    header, _, b64 = url.partition(",")
+    mime = header[5:].split(";", 1)[0].strip().lower() or "image/png"
+    data = base64.b64decode(b64 + "=" * (-len(b64) % 4))
+    return data, mime
 
 
 def _download_image(url, images_dir, seq, name_prefix=""):
@@ -119,14 +161,18 @@ def _download_image(url, images_dir, seq, name_prefix=""):
 
     文件名：<name_prefix>_<seq>.<ext>。name_prefix 取自文章 docx 文件名，使每篇文章
     的图片在共享的 images/ 目录里互不撞名（旧实现用 001/002 会被同分类同日的其它文章覆盖）。
+    支持三种 src：http(s) 远程图片、data:image/ 内嵌图片（手动导入粘贴的截图）。
     下载后校验字节确为图片（魔数），非图片（如 404/HTML 错误页）返回 None。
     """
     try:
-        resp = http_get(url)
-        if resp.status_code >= 400:
-            return None
-        data = resp.content
-        ctype = resp.headers.get("Content-Type", "")
+        if url.startswith("data:"):
+            data, ctype = _decode_data_url(url)
+        else:
+            resp = http_get(url)
+            if resp.status_code >= 400:
+                return None
+            data = resp.content
+            ctype = resp.headers.get("Content-Type", "")
         if not _is_image_bytes(data, ctype):
             return None
         # 由 Content-Type 或 URL 推断扩展名
@@ -157,7 +203,7 @@ def _download_image(url, images_dir, seq, name_prefix=""):
 
 
 def _resolve_author(source, detail):
-    """作者规则：单位动态 -> 各单位；其他 -> 原作者或空。"""
+    """作者规则：单位动态 -> 各单位；其他 -> 原作者（含文章页「来源：xxx」抽取值）。"""
     if source.author_policy:
         return source.author_policy
     return (detail.get("author") or "").strip()
@@ -197,7 +243,20 @@ def generate(source, detail, date_str):
         meta_parts.append(detail["publish_date"])
     _add_meta(doc, "  ".join(meta_parts))
 
-    # 按原文顺序写入正文块
+    # 第一遍：按块顺序给图片编号，并发预下载全部图片（_download_image 无状态、
+    # 文件名含 img_prefix 互不冲突；序号/失败占号规则与旧的串行实现一致）
+    img_jobs = []   # [(seq, src), ...]，顺序即块顺序
+    for block in detail.get("blocks", []):
+        if block.get("type") == "image" and (block.get("src") or ""):
+            img_jobs.append((len(img_jobs) + 1, block["src"]))
+    preloaded = {}  # seq -> 本地路径或 None
+    if img_jobs:
+        with ThreadPoolExecutor(max_workers=IMAGE_WORKERS, thread_name_prefix="img-dl") as ipool:
+            futs = [ipool.submit(_download_image, src, images_dir, seq, name_prefix=img_prefix)
+                    for seq, src in img_jobs]
+            preloaded = {seq: fut.result() for (seq, _), fut in zip(img_jobs, futs)}
+
+    # 第二遍：按原文顺序写入正文块（图片直接取预下载结果）
     img_seq = 0
     for block in detail.get("blocks", []):
         if block["type"] == "text":
@@ -209,7 +268,7 @@ def generate(source, detail, date_str):
             if not src:
                 continue
             img_seq += 1
-            local = _download_image(src, images_dir, img_seq, name_prefix=img_prefix)
+            local = preloaded.get(img_seq)
             if local:
                 _add_image(doc, local)
             else:

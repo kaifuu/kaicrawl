@@ -7,7 +7,7 @@ from flask import Flask
 from .extensions import db
 from .routes import register_routes
 from . import excel_sync, scheduler_jobs, auth, security_seed
-from config import DATA_DIR, OUTPUT_DIR, EXCEL_PATH, DB_URI, BASE_DIR
+from config import DATA_DIR, OUTPUT_DIR, EXCEL_PATH, DB_URI, RESOURCE_DIR
 
 
 def _ensure_columns():
@@ -21,21 +21,32 @@ def _ensure_columns():
     if "sources" not in insp.get_table_names():
         return
     cols = {c["name"] for c in insp.get_columns("sources")}
-    if "content_xpath" not in cols:
-        with db.engine.begin() as conn:
-            conn.execute(text(
-                "ALTER TABLE sources ADD COLUMN content_xpath VARCHAR(255) DEFAULT ''"))
+    # sources 表新增列统一在此登记：(列名, DDL 类型与默认值)，启动时自动补齐
+    needed = [
+        ("content_xpath", "VARCHAR(255) DEFAULT ''"),
+        ("list_xpath", "VARCHAR(255) DEFAULT ''"),
+        ("date_xpath", "VARCHAR(255) DEFAULT ''"),
+        ("meta_xpath", "VARCHAR(255) DEFAULT ''"),
+        ("page_url_pattern", "VARCHAR(255) DEFAULT ''"),
+        ("render_mode", "VARCHAR(16) DEFAULT 'static'"),
+    ]
+    with db.engine.begin() as conn:
+        for name, ddl in needed:
+            if name not in cols:
+                conn.execute(text(f"ALTER TABLE sources ADD COLUMN {name} {ddl}"))
 
 
 def create_app(start_sched=True):
     app = Flask(
         __name__,
-        template_folder=os.path.join(BASE_DIR, "templates"),
-        static_folder=os.path.join(BASE_DIR, "static"),
+        template_folder=os.path.join(RESOURCE_DIR, "templates"),
+        static_folder=os.path.join(RESOURCE_DIR, "static"),
     )
     app.config["SQLALCHEMY_DATABASE_URI"] = DB_URI
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
     app.config["SECRET_KEY"] = "dch-crawler-secret-key"
+    # 抓取线程逐条写运行日志 + web 线程并发写时的 SQLite busy 容忍（默认 5s 偏短）
+    app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {"connect_args": {"timeout": 20}}
 
     db.init_app(app)
 

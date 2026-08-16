@@ -22,7 +22,7 @@ class WechatParser(BaseParser):
     key = "wechat"
     site_name = "公众号(北京东城)"
 
-    def fetch_list(self):
+    def fetch_list(self, since_date=None, limit=None):
         raise ParserError(
             "公众号无公开列表接口。请用「URL 批量导入」：在微信复制文章链接"
             "（mp.weixin.qq.com/s/xxx）粘贴到 URL 导入页，系统自动抓取正文。"

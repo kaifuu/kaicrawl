@@ -1,36 +1,42 @@
 {% extends "base.html" %}
 {% block header %}手动导入文章（生成 WORD）{% endblock %}
 {% block page_icon %}bi bi-pencil-square{% endblock %}
-{% block page_desc %}适用于公众号、学习强国等无法自动抓取的来源。{% endblock %}
+{% block page_desc %}适用于公众号、学习强国等无法自动抓取的来源，正文支持图文混排粘贴。{% endblock %}
 {% block content %}
 <div class="card"><div class="card-body">
-<div class="hint-card"><i class="bi bi-info-circle-fill"></i><span>适用于公众号、学习强国等无法自动抓取的来源：粘贴标题与正文，系统按格式规范生成 WORD 并归入对应分类的当天文件夹。</span></div>
-<form method="post">
+<div class="hint-card"><i class="bi bi-info-circle-fill"></i><span>适用于公众号、学习强国等无法自动抓取的来源：粘贴标题与图文正文，系统按格式规范生成 WORD 并归入对应分类的当天文件夹。直接 Ctrl+V 粘贴截图或从网页复制的图文均可，图片按原位置插入正文。</span></div>
+<form method="post" id="ie-form">
   <div class="row g-3">
     <div class="col-md-6">
       <label class="form-label">数据源 *</label>
       <select name="source_id" class="form-select" required>
         <option value="">请选择...</option>
         {% for s in sources %}
-          <option value="{{ s.id }}">[{{ s.category }}] {{ s.name }}</option>
+        <option value="{{ s.id }}" {{ 'selected' if form is defined and form.get('source_id')|string == s.id|string }}>[{{ s.category }}] {{ s.name }}</option>
         {% endfor %}
       </select>
     </div>
     <div class="col-md-3">
       <label class="form-label">作者</label>
-      <input name="author" class="form-control" placeholder="留空则按来源策略">
+      <input name="author" class="form-control" placeholder="留空则按来源策略" value="{{ form.get('author','') if form is defined else '' }}">
     </div>
     <div class="col-md-3">
       <label class="form-label">发布日期</label>
-      <input type="date" name="publish_date" class="form-control">
+      <input type="date" name="publish_date" class="form-control" value="{{ form.get('publish_date','') if form is defined else '' }}">
     </div>
     <div class="col-12">
       <label class="form-label">标题 *</label>
-      <input name="title" class="form-control" required>
+      <input name="title" class="form-control" required value="{{ form.get('title','') if form is defined else '' }}">
     </div>
     <div class="col-12">
-      <label class="form-label">正文 *（每行一段，将保留段落顺序）</label>
-      <textarea name="content" class="form-control" rows="14" required></textarea>
+      <label class="form-label">正文 *（可粘贴图文：截图、网页复制的段落与图片均支持）</label>
+      <div id="ie-editor" class="import-editor ie-empty" contenteditable="true"
+           data-placeholder="在此输入或粘贴正文：支持文字段落，Ctrl+V 粘贴截图 / 网页图文，也可拖拽图片文件进来…"></div>
+      <input type="hidden" name="content_json" id="ie-json">
+      <div class="ie-hint">
+        <i class="bi bi-clipboard-image"></i> 图片 <b id="ie-imgcount">0</b> 张，段落 <b id="ie-paracount">0</b> 段
+        <button type="button" class="btn btn-sm btn-outline-danger ie-clear" id="ie-clear" title="清空正文"><i class="bi bi-eraser"></i> 清空</button>
+      </div>
     </div>
     <div class="col-12">
       <button class="btn btn-primary">生成 WORD</button>
@@ -39,4 +45,181 @@
   </div>
 </form>
 </div></div>
+
+<script>
+(function () {
+  var editor = document.getElementById('ie-editor');
+  var jsonInput = document.getElementById('ie-json');
+  var form = document.getElementById('ie-form');
+
+  var BLOCK_TAGS = { P:1, DIV:1, SECTION:1, ARTICLE:1, H1:1, H2:1, H3:1, H4:1, H5:1, H6:1,
+                     LI:1, UL:1, OL:1, TABLE:1, TR:1, TD:1, TH:1, BLOCKQUOTE:1, PRE:1,
+                     FIGURE:1, FIGCAPTION:1, BR:1, HR:1 };
+
+  function esc(s) {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  /* 把 DOM 解析成有序 token 流：{kind:'text', value, fresh} / {kind:'image', src}
+     fresh = 该 token 起始于块级边界（新段落）；行内元素之间的文字与前后合并为同段。 */
+  function walkTokens(root) {
+    var tokens = [], buf = '', fresh = true;
+    function flush() {
+      var t = buf.replace(/\s+/g, ' ').trim();
+      if (t) tokens.push({ kind: 'text', value: t, fresh: fresh });
+      buf = ''; fresh = false;
+    }
+    function imgOf(el) {
+      // 微信等懒加载站点真实地址在 data-src
+      return el.getAttribute('data-src') || el.getAttribute('src') || '';
+    }
+    (function walk(node) {
+      for (var i = 0; i < node.childNodes.length; i++) {
+        var c = node.childNodes[i];
+        if (c.nodeType === 3) { buf += c.nodeValue; continue; }
+        if (c.nodeType !== 1) continue;
+        var tag = c.tagName;
+        if (tag === 'IMG') {
+          flush();
+          var src = imgOf(c);
+          if (/^(https?:|data:image\/)/i.test(src)) tokens.push({ kind: 'image', src: src });
+          fresh = true;
+        } else if (BLOCK_TAGS[tag]) {
+          flush(); fresh = true;
+          if (tag !== 'BR' && tag !== 'HR') walk(c);
+          flush(); fresh = true;
+        } else {
+          walk(c);   // 行内元素（span/strong/a…）继续并入当前段
+        }
+      }
+    })(root);
+    flush();
+    return tokens;
+  }
+
+  /* token 流 → 提交用的 blocks：相邻且非块级边界的文字合并为一段 */
+  function tokensToBlocks(tokens) {
+    var blocks = [];
+    tokens.forEach(function (t) {
+      if (t.kind === 'image') {
+        blocks.push({ type: 'image', src: t.src });
+      } else if (!t.fresh && blocks.length && blocks[blocks.length - 1].type === 'text') {
+        blocks[blocks.length - 1].data += t.value;
+      } else {
+        blocks.push({ type: 'text', data: t.value });
+      }
+    });
+    return blocks;
+  }
+
+  function tokensToHtml(tokens) {
+    return tokens.map(function (t) {
+      if (t.kind === 'image') {
+        var ref = /^https?:/i.test(t.src) ? ' referrerpolicy="no-referrer"' : '';
+        return '<p><img src="' + esc(t.src) + '"' + ref + '></p>';
+      }
+      return '<p>' + esc(t.value) + '</p>';
+    }).join('');
+  }
+
+  function insertHtml(html) {
+    editor.focus();
+    document.execCommand('insertHTML', false, html);
+  }
+
+  function readFileAsDataURL(file, cb) {
+    var fr = new FileReader();
+    fr.onload = function () { cb(fr.result); };
+    fr.readAsDataURL(file);
+  }
+
+  function insertImageFiles(files) {
+    var imgs = [];
+    for (var i = 0; i < files.length; i++) {
+      if (files[i].type && files[i].type.indexOf('image/') === 0) imgs.push(files[i]);
+    }
+    imgs.forEach(function (f) {
+      readFileAsDataURL(f, function (url) {
+        insertHtml('<p><img src="' + esc(url) + '"></p>');
+      });
+    });
+    return imgs.length;
+  }
+
+  /* 粘贴：截图文件 > 网页富文本（提取文字+图片） > 纯文本 */
+  editor.addEventListener('paste', function (e) {
+    var cd = e.clipboardData;
+    if (!cd) return;
+    var files = [];
+    for (var i = 0; i < cd.files.length; i++) {
+      if (cd.files[i].type && cd.files[i].type.indexOf('image/') === 0) files.push(cd.files[i]);
+    }
+    if (files.length) {
+      e.preventDefault();
+      insertImageFiles(files);
+      return;
+    }
+    var html = cd.getData('text/html');
+    if (html) {
+      e.preventDefault();
+      var doc = new DOMParser().parseFromString(html, 'text/html');
+      insertHtml(tokensToHtml(walkTokens(doc.body)));
+      return;
+    }
+    // 纯文本走默认行为
+  });
+
+  /* 拖拽图片文件进编辑器 */
+  editor.addEventListener('dragover', function (e) { e.preventDefault(); });
+  editor.addEventListener('drop', function (e) {
+    if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
+      e.preventDefault();
+      insertImageFiles(e.dataTransfer.files);
+    }
+  });
+
+  function updateStatus() {
+    var tokens = walkTokens(editor);
+    var blocks = tokensToBlocks(tokens);
+    var nImg = blocks.filter(function (b) { return b.type === 'image'; }).length;
+    var nTxt = blocks.filter(function (b) { return b.type === 'text'; }).length;
+    document.getElementById('ie-imgcount').textContent = nImg;
+    document.getElementById('ie-paracount').textContent = nTxt;
+    var empty = nImg === 0 && nTxt === 0;
+    editor.classList.toggle('ie-empty', empty && !editor.textContent.trim());
+  }
+  editor.addEventListener('input', updateStatus);
+
+  document.getElementById('ie-clear').addEventListener('click', function () {
+    if (editor.textContent.trim() || editor.querySelector('img')) {
+      if (confirm('清空全部正文（含图片）？')) { editor.innerHTML = ''; updateStatus(); editor.focus(); }
+    }
+  });
+
+  /* 提交：编辑器 → blocks JSON */
+  form.addEventListener('submit', function (e) {
+    var blocks = tokensToBlocks(walkTokens(editor));
+    if (!blocks.length) {
+      e.preventDefault();
+      alert('正文不能为空：请输入文字或粘贴图片');
+      editor.focus();
+      return;
+    }
+    jsonInput.value = JSON.stringify(blocks);
+  });
+
+  /* 服务端校验失败重渲染时恢复正文 */
+  var restore = {{ (form.get('content_json') if form is defined else '') | tojson if (form is defined and form.get('content_json')) else 'null' }};
+  if (restore) {
+    try {
+      var rb = JSON.parse(restore);
+      editor.innerHTML = tokensToHtml(rb.map(function (b) {
+        return b.type === 'image' ? { kind: 'image', src: b.src }
+                                  : { kind: 'text', value: b.data, fresh: true };
+      }));
+    } catch (err) { /* 忽略损坏的 JSON */ }
+  }
+  updateStatus();
+})();
+</script>
 {% endblock %}

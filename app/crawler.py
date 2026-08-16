@@ -6,15 +6,19 @@ run_source 假定调用方已处于 Flask application context 中（路由线程
 """
 import os
 import time
+import types
 import logging
 import threading
+import traceback
+from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
 from .extensions import db
-from .models import Source, Article, CrawlLog, Task
+from .models import Source, Article, CrawlLog, CrawlLogLine, Task
 from .sources import get_parser, ParserError
 from . import docx_writer
-from config import OUTPUT_DIR, REQUEST_DELAY
+from config import OUTPUT_DIR, REQUEST_DELAY, DETAIL_PREFETCH
 
 _locks = {}
 _locks_guard = threading.Lock()
@@ -54,6 +58,35 @@ def _clear_stop(source_id):
 _log = logging.getLogger(__name__)
 
 
+class _RunLogWriter:
+    """逐条运行日志写入器：详情页终端实时滚动用。
+
+    - seq 在单次运行内单调递增，前端按 after=<seq> 增量拉取；
+    - 父日志被「清空日志」删掉后置 dead，后续行全部丢弃（SQLite 不强制外键，防孤儿行）；
+    - 只在会话干净的时机调用 write()：其内部 commit 会顺带 flush 会话中挂起的其它变更。
+    """
+
+    def __init__(self, log_id):
+        self.log_id = log_id
+        self.seq = 0
+        self.dead = False
+
+    def write(self, text, level="info"):
+        if self.dead:
+            return
+        try:
+            if db.session.get(CrawlLog, self.log_id) is None:
+                self.dead = True  # 日志已被清空，停止写入
+                return
+            self.seq += 1
+            db.session.add(CrawlLogLine(log_id=self.log_id, seq=self.seq,
+                                        level=level, text=str(text)[:2000]))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            _log.warning("运行日志行写入失败", exc_info=True)
+
+
 def _remove_docx(rel_path):
     """删除 OUTPUT_DIR 下相对路径的旧 WORD 文件。文件缺失或删除失败均不抛错。"""
     if not rel_path:
@@ -74,6 +107,20 @@ def _article_intact(article):
     if not article.docx_path:
         return False
     return os.path.isfile(os.path.join(OUTPUT_DIR, article.docx_path))
+
+
+def _source_snapshot(source):
+    """把 Source ORM 行拷成纯值对象（types.SimpleNamespace）。
+
+    详情预取线程会调用 parser.fetch_detail，其中读取 self.source 的属性；
+    而 ORM 实例每次 commit 后过期（默认 expire_on_commit=True），过期属性的
+    懒刷新会跨线程触碰主线程的 Session（greenlet 错误/竞态）——快照彻底断开
+    这条跨线程通道，预取线程只读纯值。
+    """
+    snap = types.SimpleNamespace()
+    for col in Source.__table__.columns:
+        setattr(snap, col.name, getattr(source, col.name))
+    return snap
 
 
 def run_source(source_id, task_id=None, overwrite=False, since_date=None, limit=None):
@@ -99,59 +146,116 @@ def run_source(source_id, task_id=None, overwrite=False, since_date=None, limit=
                    started_at=started)
     db.session.add(log)
     db.session.commit()
+    logw = _RunLogWriter(log.id)
+    logw.write(f"▶ 开始抓取 · [{source.category}] {source.name} · 触发={'定时任务' if task_id else '手动'}"
+               f" · 覆盖={'是' if overwrite else '否'} · 回溯={since_date or '无'}"
+               f" · 上限={limit or '默认'} · 运行 #{log.id}")
 
-    new_count, total, failed, overwritten, repaired = 0, 0, 0, 0, 0
+    new_count, total, failed, overwritten, repaired, skipped = 0, 0, 0, 0, 0, 0
     stopped = False
     try:
-        parser = get_parser(source)
+        # 预取线程用的解析器以离线快照构造（断开 ORM 懒刷新的跨线程通道）
+        parser = get_parser(_source_snapshot(source))
         items = parser.fetch_list(since_date=since_date, limit=limit)
         total = len(items)
+        if total:
+            logw.write(f"✓ 列表获取成功 · 共 {total} 篇待检查")
+        else:
+            logw.write("列表为空，无可处理文章", "warn")
 
+        # 预扫描：一次批量查已有记录并预分类（fetch_list 各实现均按 URL 去重）。
+        # 跳过条件与逐篇查询完全一致：记录存在且文件完好且非覆盖。跳过项不预取。
+        existing_by_url = {}
+        if items:
+            urls = [it["url"] for it in items]
+            existing_by_url = {r.url: r for r in Article.query.filter(
+                Article.source_id == source.id, Article.url.in_(urls)).all()}
+        skip_urls, work_urls = set(), []
         for it in items:
-            if _stop_requested(source.id):
-                stopped = True
-                break
-            url = it["url"]
-            existing = Article.query.filter_by(source_id=source.id, url=url).first()
-            # 跳过条件：记录存在且文件完好。文件缺失（人工删除等）→ 重新生成。
-            if existing and not overwrite and _article_intact(existing):
-                continue
-            need_regen = existing is not None          # 覆盖 或 文件缺失
-            is_repair = need_regen and not overwrite   # 仅因文件缺失而重生成（非用户主动覆盖）
-            try:
-                if need_regen:
-                    # 覆盖：文件可能在（删之）；修复：文件已丢（no-op）。都先删旧记录释放唯一约束。
-                    _remove_docx(existing.docx_path)
-                    db.session.delete(existing)
-                    db.session.commit()
-                detail = parser.fetch_detail(url)
-                if not (detail.get("title") or "").strip():
-                    detail["title"] = it.get("title") or "无标题"
-                docx_path, images_dir = docx_writer.generate(source, detail, today)
-                db.session.add(Article(
-                    source_id=source.id,
-                    title=(detail.get("title") or "无标题")[:500],
-                    author=(detail.get("author") or "")[:128],
-                    publish_date=(detail.get("publish_date") or "")[:32],
-                    url=url,
-                    docx_path=os.path.relpath(docx_path, OUTPUT_DIR).replace("\\", "/"),
-                    images_dir=os.path.relpath(images_dir, OUTPUT_DIR).replace("\\", "/"),
-                    status="ok",
-                ))
-                if is_repair:
-                    repaired += 1
-                elif need_regen:
-                    overwritten += 1
-                else:
-                    new_count += 1
-                db.session.commit()
-            except Exception as e:
-                # 单篇失败不中断整体；不落 Article 以便下次重试
-                failed += 1
-                log.message = (log.message or "") + f"\n失败：{it.get('title','')[:30]} -> {e}"
-            time.sleep(REQUEST_DELAY)
+            ex = existing_by_url.get(it["url"])
+            if ex and not overwrite and _article_intact(ex):
+                skip_urls.add(it["url"])
+            else:
+                work_urls.append(it["url"])
 
-        db.session.commit()
+        # 详情滑动窗口预取：预取线程只跑无状态 fetch_detail（不碰 DB/日志），
+        # 主线程按列表顺序消费 future——落库、日志、删除旧记录全部留在主线程。
+        W = max(1, DETAIL_PREFETCH)
+        pool = ThreadPoolExecutor(max_workers=W, thread_name_prefix=f"detail-{source.id}")
+        futures = deque()   # 队头恒为当前待处理项的 future（按 work_urls 顺序提交）
+        wi = 0
+
+        def _topup():
+            nonlocal wi
+            while len(futures) < W and wi < len(work_urls):
+                futures.append(pool.submit(parser.fetch_detail, work_urls[wi]))
+                wi += 1
+
+        try:
+            for idx, it in enumerate(items, 1):
+                if _stop_requested(source.id):
+                    logw.write(f"■ 收到停止信号，处理完当前环节后结束（已检查 {idx - 1} 篇）", "warn")
+                    stopped = True
+                    break
+                url = it["url"]
+                # 跳过条件：记录存在且文件完好。文件缺失（人工删除等）→ 重新生成。
+                if url in skip_urls:
+                    skipped += 1
+                    logw.write(f"· [{idx}/{total}] 跳过（已归档）· {(it.get('title') or '')[:40]}", "dim")
+                    continue
+                existing = existing_by_url.get(url)
+                need_regen = existing is not None          # 覆盖 或 文件缺失
+                is_repair = need_regen and not overwrite   # 仅因文件缺失而重生成（非用户主动覆盖）
+                _topup()
+                fut = futures.popleft()
+                try:
+                    if need_regen:
+                        # 覆盖：文件可能在（删之）；修复：文件已丢（no-op）。都先删旧记录释放唯一约束。
+                        _remove_docx(existing.docx_path)
+                        db.session.delete(existing)
+                        db.session.commit()
+                    detail = fut.result()
+                    if not (detail.get("title") or "").strip():
+                        detail["title"] = it.get("title") or "无标题"
+                    docx_path, images_dir = docx_writer.generate(source, detail, today)
+                    db.session.add(Article(
+                        source_id=source.id,
+                        title=(detail.get("title") or "无标题")[:500],
+                        author=(detail.get("author") or "")[:128],
+                        publish_date=(detail.get("publish_date") or "")[:32],
+                        url=url,
+                        docx_path=os.path.relpath(docx_path, OUTPUT_DIR).replace("\\", "/"),
+                        images_dir=os.path.relpath(images_dir, OUTPUT_DIR).replace("\\", "/"),
+                        status="ok",
+                    ))
+                    if is_repair:
+                        repaired += 1
+                    elif need_regen:
+                        overwritten += 1
+                    else:
+                        new_count += 1
+                    db.session.commit()
+                    title_short = (detail.get("title") or "无标题")[:40]
+                    fname = os.path.basename(docx_path)
+                    if is_repair:
+                        logw.write(f"修补 [{idx}/{total}] 文件缺失重抓 · {title_short} · {fname}", "warn")
+                    elif need_regen:
+                        logw.write(f"↻ [{idx}/{total}] 覆盖 · {title_short} · {fname}")
+                    else:
+                        logw.write(f"✓ [{idx}/{total}] 新增 · {title_short} · {fname}", "success")
+                except Exception as e:
+                    # 单篇失败不中断整体；不落 Article 以便下次重试
+                    failed += 1
+                    logw.write(f"✗ [{idx}/{total}] 失败 · {(it.get('title') or '')[:40]} · {e}", "error")
+                    if not isinstance(e, ParserError):
+                        logw.write("    ↳ " + traceback.format_exc().strip()[-400:], "error")
+                    log.message = (log.message or "") + f"\n失败：{it.get('title','')[:30]} -> {e}"
+                time.sleep(REQUEST_DELAY)
+
+            db.session.commit()
+        finally:
+            # 停止/异常时弃置在途预取（浪费 ≤ 窗口数）；已提交的渲染照常完成，不毒化渲染线程
+            pool.shutdown(wait=False, cancel_futures=True)
         processed = new_count + overwritten + repaired + failed
         if stopped:
             log.status = "stopped"
@@ -166,10 +270,13 @@ def run_source(source_id, task_id=None, overwrite=False, since_date=None, limit=
         db.session.rollback()
         log.status = "error"
         log.message = str(e)
+        logw.write(f"✗ 列表解析失败 · {e}", "error")
     except Exception as e:
         db.session.rollback()
         log.status = "error"
         log.message = f"未知错误：{e}"
+        logw.write(f"✗ 未知错误 · {e}", "error")
+        logw.write("    ↳ " + traceback.format_exc().strip()[-400:], "error")
     finally:
         log.finished_at = datetime.now()
         log.new_count = new_count
@@ -181,6 +288,11 @@ def run_source(source_id, task_id=None, overwrite=False, since_date=None, limit=
                 t.last_status = log.status
                 t.last_message = (log.message or "")[:250]
         db.session.commit()
+        result_label = {"success": "成功", "error": "失败", "stopped": "已停止"}.get(log.status, log.status)
+        cost = int((log.finished_at - started).total_seconds())
+        final_level = "success" if log.status == "success" else ("error" if log.status == "error" else "warn")
+        logw.write(f"■ 运行结束 · 结果={result_label} · 耗时 {cost}s · 列表 {total} · 新增 {new_count}"
+                   f" · 覆盖 {overwritten} · 修复 {repaired} · 失败 {failed} · 跳过 {skipped}", final_level)
         _clear_stop(source.id)
         lock.release()
     return log

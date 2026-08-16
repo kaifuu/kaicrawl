@@ -3,7 +3,11 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 *.egg
-build/
+# build/ 里只提交发布脚本，打包中间产物忽略
+build/*
+!build/KaiCrawl.spec
+!build/KaiCrawl.iss
+!build/发布说明.md
 dist/
 .venv/
 venv/

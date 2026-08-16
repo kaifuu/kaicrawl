@@ -1,0 +1,307 @@
+{% extends "base.html" %}
+{% from "_pagination.html" import render_pagination %}
+{% block title %}发布管理 · KaiCrawl{% endblock %}
+{% block header %}发布管理{% endblock %}
+{% block page_icon %}bi bi-box-seam{% endblock %}
+{% block page_desc %}一键把工程打包成 EXE（Win7 正式包 / 冒烟包），版本号与更新说明全程留档，构建日志实时滚动。{% endblock %}
+{% block page_actions %}
+{% if not frozen and current_user.has_perm('release:build') %}
+<button class="btn btn-sm btn-primary" id="rel-new-btn" {% if building %}disabled title="已有构建正在进行"{% endif %} data-bs-toggle="modal" data-bs-target="#relBuildModal">
+  <i class="bi bi-rocket-takeoff me-1"></i>新建发布
+</button>
+{% endif %}
+{% endblock %}
+
+{% block content %}
+
+{# ===== 版本概况 ===== #}
+<div class="card detail-card"><div class="card-body">
+  <div class="detail-stats">
+    <div class="ds-item">
+      <div class="ds-label">当前版本</div>
+      <div class="ds-value"><i class="bi bi-tag-fill me-1"></i>v{{ current_version }}</div>
+    </div>
+    <div class="ds-item">
+      <div class="ds-label">最新发布</div>
+      <div class="ds-value">{% if latest %}v{{ latest.version }} · {{ latest.finished_at.strftime('%Y-%m-%d %H:%M') if latest.finished_at else '—' }}{% else %}尚未发布{% endif %}</div>
+    </div>
+    <div class="ds-item">
+      <div class="ds-label">累计发布</div>
+      <div class="ds-value"><i class="bi bi-stack me-1"></i>{{ pagination.total }} 次</div>
+    </div>
+    <div class="ds-item">
+      <div class="ds-label">Win7 工具链</div>
+      <div class="ds-value">
+        {% if frozen %}<span class="log-badge is-other">打包版内不可构建</span>
+        {% elif toolchain %}<span class="log-badge is-success"><i class="bi bi-check-circle-fill"></i> {{ toolchain }}</span>
+        {% else %}<span class="log-badge is-stopped"><i class="bi bi-exclamation-triangle-fill"></i> 未装 Python 3.8/3.9</span>{% endif %}
+      </div>
+    </div>
+  </div>
+  {% if not frozen and not toolchain %}
+  <div class="detail-msg">未找到 Win7 兼容的 Python 3.8/3.9，只能发「冒烟包」验证链路；正式 Win7 包请先装 <a href="https://www.python.org/downloads/release/python-3810/" target="_blank" rel="noopener noreferrer">Python 3.8.10</a>（详见 build/发布说明.md）。</div>
+  {% elif frozen %}
+  <div class="detail-msg">当前运行的是打包版，无法再打包；请在源码环境的电脑上操作发布。</div>
+  {% else %}
+  <div class="detail-msg">Win7 正式包用 Python 3.8 工具链独立构建；冒烟包用当前解释器快速验证打包链路，产物不含 Win7 保证。</div>
+  {% endif %}
+</div></div>
+
+{% if building %}
+<div class="alert alert-info d-flex align-items-center gap-2 py-2" id="rel-building-tip">
+  <span class="log-badge is-running"><span class="dot"></span> 构建中</span>
+  <span>v{{ building.version }} 正在打包（开始于 {{ building.started_at.strftime('%H:%M:%S') if building.started_at else '—' }}），本页每 6 秒自动刷新，或点「日志」实时查看。</span>
+</div>
+{% endif %}
+
+{# ===== 发布历史 ===== #}
+<div class="card"><div class="card-body p-0">
+<table class="table table-sm table-hover mb-0 align-middle logs-table rel-table">
+  <thead><tr>
+    <th>版本</th>
+    <th>渠道</th>
+    <th>状态</th>
+    <th>更新说明</th>
+    <th>Python</th>
+    <th>产物大小</th>
+    <th><i class="bi bi-calendar3"></i> 开始时间</th>
+    <th>耗时</th>
+    <th class="text-end" style="width:1%">操作</th>
+  </tr></thead>
+  <tbody>
+  {% for r in releases %}
+    <tr class="log-row log-{% if r.status == 'building' %}running{% elif r.status == 'failed' %}error{% else %}success{% endif %}">
+      <td><span class="rel-ver">v{{ r.version }}</span></td>
+      <td><span class="rel-chip c-{{ r.channel }}">{{ channel_labels.get(r.channel, r.channel) }}</span></td>
+      <td>
+        {% if r.status == 'building' %}<span class="log-badge is-running"><span class="dot"></span> 构建中</span>
+        {% elif r.status == 'success' %}<span class="log-badge is-success"><i class="bi bi-check-circle-fill"></i> 成功</span>
+        {% else %}<span class="log-badge is-error"><i class="bi bi-x-circle-fill"></i> 失败</span>{% endif %}
+      </td>
+      <td class="msg-cell" title="{{ r.note or r.message }}">{{ r.note or r.message or '—' }}</td>
+      <td class="log-time">{{ r.python_ver or '—' }}</td>
+      <td class="log-time">{% if r.dist_size %}{{ (r.dist_size / 1048576) | round(1) }} MB{% else %}—{% endif %}</td>
+      <td class="log-time">{{ r.started_at.strftime('%m-%d %H:%M:%S') if r.started_at else '—' }}</td>
+      <td class="log-dur">{% if r.started_at %}<i class="bi bi-stopwatch"></i>{{ ((r.finished_at or now) - r.started_at).total_seconds() | int }}s{% else %}—{% endif %}</td>
+      <td class="text-end log-actions">
+        <button class="btn-icon rel-log-btn" type="button" data-rid="{{ r.id }}" data-ver="v{{ r.version }}"
+                title="构建日志：终端式实时滚动">
+          <i class="bi bi-terminal"></i>
+        </button>
+        {% if r.status == 'success' %}
+        <button class="btn-icon rel-open-btn" type="button" data-rid="{{ r.id }}" title="打开产物目录 dist\KaiCrawl">
+          <i class="bi bi-folder-symlink"></i>
+        </button>
+        {% if r.zip_path %}
+        <a class="btn-icon" href="{{ url_for('releases.download', rid=r.id) }}" title="下载产物 zip">
+          <i class="bi bi-file-earmark-zip"></i>
+        </a>
+        {% endif %}
+        {% endif %}
+        {% if r.status != 'building' and current_user.has_perm('release:delete') %}
+        <form method="post" action="{{ url_for('releases.delete', rid=r.id) }}" onsubmit="return confirm('删除发布记录 v{{ r.version }}？\n（磁盘上的 dist 产物不删，可手动清理）');" style="display:inline">
+          <button class="btn-icon is-danger" title="删除发布记录"><i class="bi bi-trash"></i></button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+  {% else %}
+    <tr><td colspan="9" class="empty-state"><span class="es-ico"><i class="bi bi-box-seam"></i></span><span class="es-msg">还没有发布记录，点右上角「新建发布」打出第一个包</span></td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div></div>
+{{ render_pagination(pagination, 'releases.index') }}
+
+{# ===== 新建发布弹窗 ===== #}
+<div class="modal fade" id="relBuildModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-rocket-takeoff me-2"></i>新建发布</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <form id="rel-build-form">
+          <div class="mb-3">
+            <label class="form-label">版本号</label>
+            <div class="input-group input-group-sm">
+              <span class="input-group-text">v</span>
+              <input class="form-control" name="version" id="rel-version" value="{{ suggest }}" pattern="\d+(\.\d+){0,3}" required>
+            </div>
+            <div class="form-text">数字点分格式（如 1.0.1）；已按最新版本自动 +1，可手改。</div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label d-block">发布渠道</label>
+            <div class="form-check">
+              <input class="form-check-input" type="radio" name="channel" id="ch-win7" value="win7" {% if toolchain %}checked{% endif %}>
+              <label class="form-check-label" for="ch-win7"><b>Win7 正式包</b> — 用 Python 3.8/3.9 工具链独立环境构建，可在 Win7 安装运行{% if not toolchain %}（<span class="text-warning">本机未装 3.8/3.9，选此项会失败</span>）{% endif %}</label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" type="radio" name="channel" id="ch-smoke" value="smoke" {% if not toolchain %}checked{% endif %}>
+              <label class="form-check-label" for="ch-smoke"><b>冒烟验证包</b> — 用当前 Python 快速验证打包链路，产物无 Win7 保证</label>
+            </div>
+          </div>
+          <div class="mb-1">
+            <label class="form-label" for="rel-note">更新说明（选填）</label>
+            <textarea class="form-control form-control-sm" name="note" id="rel-note" rows="3" placeholder="本次发布改了什么，如：新增发布页、修复文章删除 500"></textarea>
+          </div>
+          <div id="rel-build-error" class="text-danger small mt-2" hidden></div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">取消</button>
+        <button type="submit" form="rel-build-form" class="btn btn-sm btn-primary" id="rel-build-go">
+          <i class="bi bi-play-fill"></i> 开始构建
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# ===== 构建日志弹窗（终端式） ===== #}
+<div class="modal fade" id="relLogModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-terminal me-2"></i>构建日志 · <span id="rl-title">v?</span></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-0">
+        <div class="console-card" style="border:none">
+          <div class="console-head">
+            <span class="console-dots"><i></i><i></i><i></i></span>
+            <span class="console-title">构建输出</span>
+            <span id="rl-state" class="console-state">监听中…</span>
+          </div>
+          <div class="console-wrap">
+            <div id="rl-body" class="console-body"></div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer d-flex justify-content-between">
+        <span id="rl-msg" class="small text-muted"></span>
+        <div>
+          <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">关闭</button>
+          <a id="rl-dl" class="btn btn-sm btn-primary" href="#" hidden><i class="bi bi-download me-1"></i>下载 zip</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  // ---- 构建中：列表页自动刷新（弹窗打开时暂停） ----
+  {% if building %}
+  setInterval(function () {
+    if (document.hidden || document.querySelector('.modal.show')) return;
+    location.reload();
+  }, 6000);
+  {% endif %}
+
+  // ---- 打开产物目录 ----
+  document.querySelectorAll('.rel-open-btn').forEach(function (b) {
+    b.addEventListener('click', function () {
+      fetch('{{ url_for("releases.index") }}' + b.dataset.rid + '/open', { headers: { 'X-Requested-With': 'fetch' } })
+        .then(function (r) { return r.json(); })
+        .then(function (d) { if (!d.ok) alert('打开失败：' + (d.error || '')); });
+    });
+  });
+
+  // ---- 日志弹窗：终端式轮询 ----
+  var logModalEl = document.getElementById('relLogModal');
+  var body = document.getElementById('rl-body');
+  var stateEl = document.getElementById('rl-state');
+  var msgEl = document.getElementById('rl-msg');
+  var dlEl = document.getElementById('rl-dl');
+  var buildModalEl = document.getElementById('relBuildModal');
+  var timer = null, lastSeq = 0, running = false, rid = null;
+
+  function appendLine(l) {
+    var div = document.createElement('div');
+    div.className = 'console-line lv-' + (l.level || 'info');
+    var t = document.createElement('span');
+    t.className = 'cl-time';
+    t.textContent = l.ts || '';
+    div.appendChild(t);
+    div.appendChild(document.createTextNode(l.text || ''));
+    body.appendChild(div);
+  }
+
+  function stopPolling(d) {
+    running = false;
+    if (timer) { clearInterval(timer); timer = null; }
+    stateEl.textContent = d && d.finished_at ? ('已结束 · ' + d.finished_at) : '已结束';
+    body.scrollTop = body.scrollHeight;
+    if (d && d.status === 'success') {
+      dlEl.hidden = false;
+      dlEl.href = '{{ url_for("releases.index") }}' + rid + '/download';
+      setTimeout(function () { if (!document.querySelector('.modal.show')) location.reload(); }, 1500);
+    }
+  }
+
+  function poll() {
+    fetch('{{ url_for("releases.index") }}' + rid + '/lines?after=' + lastSeq, { headers: { 'X-Requested-With': 'fetch' } })
+      .then(function (r) { return r.status === 404 ? null : r.json(); })
+      .then(function (d) {
+        if (!d) { stopPolling(null); return; }
+        lastSeq = d.last_seq;
+        d.lines.forEach(appendLine);
+        if (d.message) msgEl.textContent = d.message;
+        body.scrollTop = body.scrollHeight;
+        if (d.finished) stopPolling(d);
+      })
+      .catch(function () { /* 瞬时网络异常，保活轮询 */ });
+  }
+
+  function openLog(id, ver) {
+    rid = id; lastSeq = 0; running = true;
+    body.innerHTML = '';
+    msgEl.textContent = ''; dlEl.hidden = true;
+    document.getElementById('rl-title').textContent = ver;
+    stateEl.textContent = '监听中…';
+    new bootstrap.Modal(logModalEl).show();
+    poll();
+    timer = setInterval(poll, 1500);
+  }
+
+  document.querySelectorAll('.rel-log-btn').forEach(function (b) {
+    b.addEventListener('click', function () { openLog(b.dataset.rid, b.dataset.ver); });
+  });
+
+  // ---- 新建发布：fetch 提交，成功直接切到日志弹窗 ----
+  document.getElementById('rel-build-form').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var errEl = document.getElementById('rel-build-error');
+    errEl.hidden = true;
+    var btn = document.getElementById('rel-build-go');
+    btn.disabled = true;
+    fetch('{{ url_for("releases.build") }}', {
+      method: 'POST',
+      body: new FormData(e.target),
+      headers: { 'X-Requested-With': 'fetch' }
+    })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+      .then(function (res) {
+        btn.disabled = false;
+        if (!res.ok) {
+          errEl.textContent = res.d.error || '发起失败';
+          errEl.hidden = false;
+          return;
+        }
+        bootstrap.Modal.getInstance(buildModalEl).hide();
+        openLog(res.d.id, 'v' + document.getElementById('rel-version').value);
+        // 构建启动后刷新顶部按钮态（按钮置灰 + 自动刷新已挂）
+        var nb = document.getElementById('rel-new-btn');
+        if (nb) nb.disabled = true;
+      })
+      .catch(function () {
+        btn.disabled = false;
+        errEl.textContent = '网络异常，请重试';
+        errEl.hidden = false;
+      });
+  });
+})();
+</script>
+{% endblock %}

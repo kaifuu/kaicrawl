@@ -1,0 +1,30 @@
+# Win7 兼容发布用的依赖锁定（配合 Python 3.8.10 / 3.9.x 使用）。
+# 原则：全部选保留 Python 3.8 支持的版本，含 Windows 旧系统可用的二进制轮子。
+# 注意：playwright 故意不装 —— Win7 无法运行其 Chromium，render_mode=browser 的源会得到
+# 「未安装 playwright」的可操作报错，static 模式不受影响。
+Flask==3.0.3
+Werkzeug==3.0.3
+Jinja2==3.1.4
+MarkupSafe==2.1.5
+itsdangerous==2.2.0
+click==8.1.7
+blinker==1.7.0
+waitress==2.1.2
+Flask-SQLAlchemy==3.1.1
+SQLAlchemy==2.0.30
+greenlet==3.0.3
+typing-extensions==4.12.2
+APScheduler==3.10.4
+tzlocal==5.2
+requests==2.31.0
+urllib3==2.2.2
+certifi==2024.7.4
+charset-normalizer==3.3.2
+idna==3.7
+beautifulsoup4==4.12.3
+soupsieve==2.5
+lxml==4.9.4
+Pillow==9.5.0
+python-docx==1.1.2
+openpyxl==3.1.2
+et-xmlfile==1.1.0

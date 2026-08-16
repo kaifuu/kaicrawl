@@ -44,7 +44,7 @@ class WechatRssParser(WechatParser):
     key = "wechat_rss"
     site_name = "公众号RSS(微信)"
 
-    def fetch_list(self):
+    def fetch_list(self, since_date=None, limit=None):
         feed_url = (self.source.url or "").strip()
         if not feed_url.lower().startswith(("http://", "https://")):
             raise ParserError(
@@ -62,7 +62,11 @@ class WechatRssParser(WechatParser):
             raise ParserError(
                 f"RSS 未解析到任何微信文章，请检查 feed 地址：{feed_url}"
             )
-        return items[:MAX_ARTICLES_PER_RUN]
+        # 回溯抓取：仅保留 since_date 当天及之后的文章（无日期的保留，避免漏抓）
+        if since_date:
+            items = [it for it in items
+                     if not it.get("publish_date") or it.get("publish_date") >= since_date]
+        return items[:limit or MAX_ARTICLES_PER_RUN]
 
     # ---- RSS / Atom 解析 ----
     def _parse_feed(self, xml_text):

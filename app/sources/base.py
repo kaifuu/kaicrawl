@@ -117,13 +117,129 @@ class GenericGovParser(BaseParser):
             return f"{y}-{int(mo):02d}-{int(d):02d}"
         return ""
 
-    def fetch_list(self, since_date=None, limit=None):
-        """抓取列表。since_date(YYYY-MM-DD) 非空时翻页回溯，跳过早于该日期的条目。
+    # ---- 通用 XPath 区域提取（source.list_xpath 配置时启用） ----
+    def _page_text(self, url, *, wait_xpath=None, wait_css=None):
+        """取页面 HTML：render_mode=browser 用 Playwright 渲染（SPA/反爬），否则 HTTP。
 
+        wait_xpath / wait_css 为正文容器就绪标志（XPath 优先）：命中即返回，
+        避免每篇详情都等必超时的 networkidle。
+        """
+        if (getattr(self.source, "render_mode", "static") or "static") == "browser":
+            from .renderer import render_html
+            return render_html(url, wait_xpath=wait_xpath, wait_css=wait_css)
+        return self._get(url).text
+
+    def _iter_pattern_pages(self):
+        """分页 URL 序列：总是先入口页，再按 page_url_pattern 追加后续页。
+
+        pattern 的 {page} 从 1 起（如 index_{page}.html / list_50765_{page}.html，
+        可为绝对 URL 或相对入口的路径）。未配置或不含 {page} 时只返回入口页。
+        与入口重复的页（如入口即第 1 页）由抓取侧 seen 去重兜住。
+        """
+        pat = (getattr(self.source, "page_url_pattern", "") or "").strip()
+        if pat and "{page}" in pat:
+            yield self.url
+            full_pat = pat if "://" in pat else urljoin(self.url, pat)
+            for n in range(1, MAX_LIST_PAGES + 1):
+                yield full_pat.replace("{page}", str(n))
+        else:
+            yield self.url
+
+    @staticmethod
+    def _norm_date(text):
+        """从文本提取 YYYY-MM-DD；DATE_RE 兼容 2026-08-14 / [2026年08月14日] 两种格式。"""
+        m = DATE_RE.search(text or "")
+        if m:
+            y, mo, d = m.groups()
+            return f"{y}-{int(mo):02d}-{int(d):02d}"
+        return ""
+
+    def _xpath_item_date(self, a_el, date_xpath=""):
+        """条目日期：优先 date_xpath（相对条目容器求值），否则条目容器文本启发式。"""
+        container = None
+        for parent in a_el.iterancestors():
+            if parent.tag in ("li", "tr", "dd", "div"):
+                container = parent
+                break
+        container = container or a_el
+        if date_xpath:
+            try:
+                for n in container.xpath(date_xpath):
+                    text = n if isinstance(n, str) else "".join(n.itertext())
+                    got = self._norm_date(text)
+                    if got:
+                        return got
+            except Exception:
+                pass  # date_xpath 写错不致命，回退启发式
+        return self._norm_date("".join(container.itertext()))
+
+    def _fetch_list_by_xpath(self, since_date=None, limit=None):
+        """按配置的 list_xpath 提取文章列表：新站点只需 URL + 区域 XPath，零代码接入。
+
+        区域外的导航/分页链接天然不会进入；区域内 <a> 取标题与链接，日期按
+        date_xpath 或条目容器启发式。跨页由 page_url_pattern 驱动，页序假定
+        按日期降序，遇早于 since_date 的条目即收尾。
+        """
+        lx = (getattr(self.source, "list_xpath", "") or "").strip()
+        dx = (getattr(self.source, "date_xpath", "") or "").strip()
+        cap = limit or (MAX_ARTICLES_BACKFILL if since_date else MAX_ARTICLES_PER_RUN)
+        items, seen, stop = [], set(), False
+        page_iter = self._iter_pattern_pages()
+        pages = page_iter if since_date else [next(page_iter)]
+        fails = 0
+        for idx, page_url in enumerate(pages):
+            if stop:
+                break
+            try:
+                text = self._page_text(page_url, wait_xpath=lx)
+                fails = 0
+            except ParserError:
+                if idx == 0:
+                    raise            # 首页失败 = 来源本身异常，上抛
+                fails += 1
+                if fails >= 3:
+                    break            # 连续 3 页取不到 = 翻到底（容忍 index_1 这类零星缺页）
+                continue
+            try:
+                doc = lxml.html.fromstring(text or "")
+            except Exception as e:
+                raise ParserError(f"列表页解析失败：{page_url} -> {e}")
+            roots = [r for r in doc.xpath(lx) if hasattr(r, "tag")]
+            if not roots:
+                _log.warning("list_xpath 未匹配到区域：%s @ %s", lx, page_url)
+            for root in roots:
+                for a in root.xpath(".//a[@href]"):
+                    full = self.abs_url(a.get("href") or "", base=page_url)
+                    if not full:
+                        continue
+                    title = clean_text("".join(a.itertext()))
+                    if len(title) < self.link_text_min_len:
+                        continue
+                    if full in seen:
+                        continue
+                    pub = self._xpath_item_date(a, dx)
+                    if since_date and pub and pub < since_date:
+                        stop = True
+                        break
+                    seen.add(full)
+                    items.append({"url": full, "title": title, "publish_date": pub})
+                    if len(items) >= cap:
+                        stop = True
+                        break
+                if stop:
+                    break
+        return items
+
+    def fetch_list(self, since_date=None, limit=None):
+        """抓取列表。配置了 list_xpath 走通用区域提取，否则用启发式扫 <a>。
+
+        since_date(YYYY-MM-DD) 非空时翻页回溯，跳过早于该日期的条目。
         页内/页间假定按日期降序：遇到首条 pub<since_date 即停止翻页。
         limit 为本次最多抓取篇数（来自界面输入）；留空则 since_date 用 MAX_ARTICLES_BACKFILL、
         否则用 MAX_ARTICLES_PER_RUN（默认 20）。since_date 为 None 时只抓首页。
         """
+        if (getattr(self.source, "list_xpath", "") or "").strip():
+            return self._fetch_list_by_xpath(since_date=since_date, limit=limit)
         cap = limit or (MAX_ARTICLES_BACKFILL if since_date else MAX_ARTICLES_PER_RUN)
         items, seen, stop = [], set(), False
         # 不指定日期只抓首页（保持旧行为）；指定日期才翻页回溯
@@ -194,21 +310,61 @@ class GenericGovParser(BaseParser):
                 _log.warning("content_xpath 执行失败，回退默认选择器：%s -> %s", xpath, e)
         return self._select_first(soup, self.content_selectors)
 
+    def _meta_text(self, soup, resp_text):
+        """取「时间 + 来源」元信息行文本。返回 (文本, 是否 XPath 命中)。
+
+        优先级：source.meta_xpath（lxml 求值）> author_selectors（CSS 启发式）。
+        XPath 留空或匹配为空 / 抛错时，记 warning 并回退默认选择器，
+        容错策略与 _content_element 的 content_xpath 一致。
+        """
+        xpath = (getattr(self.source, "meta_xpath", "") or "").strip()
+        if xpath:
+            try:
+                doc = lxml.html.fromstring(resp_text or "")
+                matches = doc.xpath(xpath)
+                el = next((m for m in matches if hasattr(m, "tag")), None)
+                if el is not None:
+                    # 剔除阅读量/点击数计数节点与脚本样式，避免数字混进来源名
+                    for junk in el.xpath(
+                            ".//script | .//style | .//*[contains(@class,'view')"
+                            " or contains(@class,'hit') or contains(@class,'count')"
+                            " or contains(@class,'click')]"):
+                        junk.getparent().remove(junk)
+                    text = clean_text(el.text_content())
+                    if text:
+                        return text, True
+                    _log.warning("meta_xpath 命中的元素无文本（可能与浏览器节点口径有偏差），回退默认选择器：%s", xpath)
+                else:
+                    _log.warning("meta_xpath 未匹配到元素，回退默认选择器：%s", xpath)
+            except Exception as e:
+                _log.warning("meta_xpath 执行失败，回退默认选择器：%s -> %s", xpath, e)
+        el = self._select_first(soup, self.author_selectors)
+        return (clean_text(el.get_text()) if el else ""), False
+
     def fetch_detail(self, url):
-        resp = self._get(url)
-        soup = BeautifulSoup(resp.text, "lxml")
+        wait_x = (getattr(self.source, "content_xpath", "") or "").strip() or None
+        # 未配 content_xpath 时用首个内容选择器作就绪标志（CSS），命中即收
+        wait_c = None
+        if not wait_x and self.content_selectors:
+            wait_c = self.content_selectors[0]
+        resp_text = self._page_text(url, wait_xpath=wait_x, wait_css=wait_c)
+        soup = BeautifulSoup(resp_text, "lxml")
 
         title_el = self._select_first(soup, self.title_selectors)
         title = clean_text(title_el.get_text()) if title_el else clean_text(soup.title.get_text() if soup.title else "")
 
-        content_el = self._content_element(soup, resp.text)
+        content_el = self._content_element(soup, resp_text)
         blocks = self._content_to_blocks(content_el, base_url=url) if content_el else []
 
-        author = ""
-        author_el = self._select_first(soup, self.author_selectors)
-        if author_el:
-            author = self._extract_author(author_el.get_text())
+        meta_text, meta_hit = self._meta_text(soup, resp_text)
+        author = self._extract_author(meta_text)
         publish_date = self._extract_date(soup)
+        if meta_hit:
+            # 元信息行自带发布时间（如「日期：2026-08-12 16:28 来源：…」），比全页扫描准
+            m = DATE_RE.search(meta_text)
+            if m:
+                y, mo, d = m.groups()
+                publish_date = f"{y}-{int(mo):02d}-{int(d):02d}"
 
         return {
             "title": title,
@@ -251,13 +407,19 @@ class GenericGovParser(BaseParser):
         return result
 
     def _extract_author(self, text):
-        """从「责任编辑：张三」「作者：李四」「来源：人民网」等抽取作者。"""
+        """从「责任编辑：张三」「作者：李四」「来源：人民网」等抽取作者。
+
+        文章页的 来源（如「日期：2026-08-12 16:28 来源：东城区审计局」）
+        即发布单位，优先级排在责任编辑/作者之后、撰稿/编辑之前。
+        """
         if not text:
             return ""
-        for kw in ("责任编辑", "作者", "撰稿", "编辑"):
+        for kw in ("责任编辑", "作者", "来源", "撰稿", "编辑"):
             m = re.search(kw + r"[：:]\s*([^\s，,。/]+)", text)
             if m:
-                return clean_text(m.group(1))
+                val = re.sub(r"\d+$", "", clean_text(m.group(1)))  # 去掉混入的阅读量/ID 尾数
+                if val:
+                    return val
         return ""
 
     def _extract_date(self, soup):

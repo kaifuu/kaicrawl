@@ -1,8 +1,19 @@
 # -*- coding: utf-8 -*-
 """全局配置：所有路径基于 BASE_DIR 相对计算，保证可移植。"""
 import os
+import sys
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# PyInstaller 打包后（frozen）：
+#   BASE_DIR     = EXE 所在目录 —— 数据库 / WORD 输出等可写数据放这里，升级安装不丢
+#   RESOURCE_DIR = 解包资源目录（_MEIPASS）—— 模板 / 静态资源 / 种子 Excel 等只读资源
+# 源码运行时两者同为项目根目录。
+_FROZEN = getattr(sys, "frozen", False)
+if _FROZEN:
+    BASE_DIR = os.path.dirname(os.path.abspath(sys.executable))
+    RESOURCE_DIR = getattr(sys, "_MEIPASS", BASE_DIR)
+else:
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    RESOURCE_DIR = BASE_DIR
 
 # 数据目录（SQLite + WORD 输出）
 DATA_DIR = os.path.join(BASE_DIR, "data")
@@ -10,8 +21,8 @@ OUTPUT_DIR = os.path.join(DATA_DIR, "output")
 DB_PATH = os.path.join(DATA_DIR, "crawler.db")
 DB_URI = "sqlite:///" + DB_PATH.replace("\\", "/")
 
-# 数据来源 Excel（启动时若库为空则自动种子导入）
-EXCEL_PATH = os.path.join(BASE_DIR, "爬虫数据来源.xlsx")
+# 数据来源 Excel（启动时若库为空则自动种子导入）：打包后在资源目录，源码运行在项目根
+EXCEL_PATH = os.path.join(RESOURCE_DIR, "爬虫数据来源.xlsx")
 
 # 抓取相关
 REQUEST_TIMEOUT = 20          # 秒
@@ -29,11 +40,23 @@ MAX_ARTICLES_PER_RUN = 20
 MAX_LIST_PAGES = 50
 MAX_ARTICLES_BACKFILL = 500
 
+# 并发加速（渲染/详情/图片三级流水线）
+RENDER_WORKERS = 3       # Playwright 渲染线程上限：每线程独占一个 Chromium，懒启动按需增长
+DETAIL_PREFETCH = 3      # 详情页滑动窗口并发预取数（1 = 退回纯串行）
+IMAGE_WORKERS = 4        # WORD 生成时图片并发下载线程数
+
 # 服务
 HOST = "127.0.0.1"
 PORT = 5000
 DEBUG = False
 
+# 应用版本（发布管理页的基线版本号；每次网页端构建可递增）
+APP_VERSION = "1.0.0"
+
 # WORD 字体规范
 FONT_NAME = "宋体"
 FONT_SIZE_PT = 10.5   # 五号
+
+# WORD 插图尺寸：相对单页可用区域的比例（宽×高），等比缩放、只缩不放
+IMAGE_WIDTH_RATIO = 0.65    # 单图宽度 ≤ 页面可用宽度的 65%
+IMAGE_HEIGHT_RATIO = 0.55   # 单图高度 ≤ 页面可用高度的 55%，避免长截图占满整页

@@ -15,7 +15,7 @@ env/
 .python-version
 
 # ---- 运行时数据（不提交） ----
-data/crawler.db
+data/*.db
 data/output/
 data/server.log
 # 开发期调试探针文件（_xuexi_* / _probe* 等）

@@ -12,7 +12,7 @@ import threading
 import traceback
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from .extensions import db
 from .models import Source, Article, CrawlLog, CrawlLogLine, Task
@@ -123,12 +123,15 @@ def _source_snapshot(source):
     return snap
 
 
-def run_source(source_id, task_id=None, overwrite=False, since_date=None, limit=None):
+def run_source(source_id, task_id=None, overwrite=False, since_date=None, limit=None,
+               days_back=0):
     """抓取单个数据源，返回本次的 CrawlLog。已在运行则直接返回 None。
 
     overwrite=True 时，对当前列表里已存在的文章先删旧记录与旧 WORD，再重新抓取生成
     （刷新内容、避免文件名 _2/_3 堆积）；默认 False 仍按 URL 跳过已有。
     since_date(YYYY-MM-DD) 非空时回溯抓取：翻页直到早于该日期（仅支持翻页的解析器）。
+    days_back（未显式指定 since_date 时生效）为任务抓取范围：1=仅当天；N>1=最近 N 天
+    （含当天，起始日 = 运行日 - (N-1)）；0=不限（只抓列表首页）。列表无日期的条目仍放行。
     limit 为本次最多抓取篇数（界面输入），None 时用解析器默认上限。
     """
     source = db.session.get(Source, source_id)
@@ -141,14 +144,22 @@ def run_source(source_id, task_id=None, overwrite=False, since_date=None, limit=
 
     _clear_stop(source.id)  # 复位可能残留的停止信号
     started = datetime.now()
-    today = started.strftime("%Y-%m-%d")
+    today = started.strftime("%Y-%m-%d")   # 运行日，供 docx_writer 归档目录用
+    # 范围 -> 起始日期：显式回溯优先；否则按天数（1=当天，N=运行日往前推 N-1 天）
+    if since_date:
+        since, range_label = since_date, since_date
+    elif days_back > 0:
+        since = (started - timedelta(days=days_back - 1)).strftime("%Y-%m-%d")
+        range_label = "仅当天" if days_back == 1 else f"最近{days_back}天（含当天）"
+    else:
+        since, range_label = None, "全部"
     log = CrawlLog(task_id=task_id, source_id=source.id, status="running",
                    started_at=started)
     db.session.add(log)
     db.session.commit()
     logw = _RunLogWriter(log.id)
     logw.write(f"▶ 开始抓取 · [{source.category}] {source.name} · 触发={'定时任务' if task_id else '手动'}"
-               f" · 覆盖={'是' if overwrite else '否'} · 回溯={since_date or '无'}"
+               f" · 覆盖={'是' if overwrite else '否'} · 范围={range_label}"
                f" · 上限={limit or '默认'} · 运行 #{log.id}")
 
     new_count, total, failed, overwritten, repaired, skipped = 0, 0, 0, 0, 0, 0
@@ -156,7 +167,7 @@ def run_source(source_id, task_id=None, overwrite=False, since_date=None, limit=
     try:
         # 预取线程用的解析器以离线快照构造（断开 ORM 懒刷新的跨线程通道）
         parser = get_parser(_source_snapshot(source))
-        items = parser.fetch_list(since_date=since_date, limit=limit)
+        items = parser.fetch_list(since_date=since, limit=limit)
         total = len(items)
         if total:
             logw.write(f"✓ 列表获取成功 · 共 {total} 篇待检查")
@@ -299,8 +310,8 @@ def run_source(source_id, task_id=None, overwrite=False, since_date=None, limit=
 
 
 def run_task(task_id):
-    """调度器回调入口：解析任务 -> 抓取其来源。"""
+    """调度器回调入口：解析任务 -> 按任务配置抓取其来源。"""
     t = db.session.get(Task, task_id)
     if not t or not t.enabled:
         return
-    run_source(t.source_id, task_id=t.id)
+    run_source(t.source_id, task_id=t.id, days_back=t.days_back or 0)

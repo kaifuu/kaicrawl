@@ -103,16 +103,20 @@ def reconcile(app):
                 sched.remove_job(j.id)
 
 
-def run_now(app, source_id, task_id=None, overwrite=False, since_date=None, limit=None):
+def run_now(app, source_id, task_id=None, overwrite=False, since_date=None, limit=None,
+            days_back=0):
     """立即在后台线程抓取某来源（不影响页面响应）。
 
     overwrite=True 时覆盖已有文章；since_date(YYYY-MM-DD) 非空时回溯抓取（见 crawler.run_source）。
     limit 为本次最多抓取篇数（界面输入），None 时用解析器默认上限。
+    days_back 为任务抓取范围天数（任务的「立即运行」按任务配置传入）：1=仅当天，
+    N>1=最近 N 天（含当天），0=不限；显式 since_date 时忽略。
     """
     def _bg():
         with app.app_context():
             crawler.run_source(source_id, task_id=task_id,
-                               overwrite=overwrite, since_date=since_date, limit=limit)
+                               overwrite=overwrite, since_date=since_date, limit=limit,
+                               days_back=days_back)
     threading.Thread(target=_bg, daemon=True).start()
 
 

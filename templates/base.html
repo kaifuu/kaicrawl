@@ -50,11 +50,61 @@
           <ul class="dropdown-menu dropdown-menu-end">
             <li><span class="dropdown-item-text small text-muted">角色：{{ current_user.role.name if current_user.role else '—' }}</span></li>
             <li><hr class="dropdown-divider"></li>
+            <li><a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#profileModal"><i class="bi bi-person-gear me-2"></i>基本信息</a></li>
             <li><a class="dropdown-item" href="{{ url_for('auth.logout') }}"><i class="bi bi-box-arrow-right me-2"></i>退出登录</a></li>
           </ul>
         </div>
       </div>
     </header>
+
+    <!-- 右上角用户菜单：基本信息（显示名 + 修改密码）弹窗 -->
+    <div class="modal fade" id="profileModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title"><i class="bi bi-person-gear me-2"></i>基本信息</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+          </div>
+          <div class="modal-body">
+            <div class="small text-muted mb-2">
+              用户名：{{ current_user.username }} ·
+              角色：{{ current_user.role.name if current_user.role else '—' }} ·
+              上次登录：{{ current_user.last_login_at.strftime('%Y-%m-%d %H:%M') if current_user.last_login_at else '—' }}
+            </div>
+            <form method="post" action="{{ url_for('auth.profile') }}">
+              <input type="hidden" name="next" value="{{ request.path }}">
+              <div class="mb-2">
+                <label class="form-label">显示名</label>
+                <input type="text" class="form-control" name="nickname" maxlength="64"
+                       value="{{ current_user.nickname or '' }}" placeholder="留空则显示用户名">
+              </div>
+              <div class="text-end mb-3">
+                <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-check-lg me-1"></i>保存基本信息</button>
+              </div>
+            </form>
+            <hr>
+            <form method="post" action="{{ url_for('auth.password') }}">
+              <input type="hidden" name="next" value="{{ request.path }}">
+              <div class="mb-2">
+                <label class="form-label">当前密码</label>
+                <input type="password" class="form-control" name="old_password" required autocomplete="current-password">
+              </div>
+              <div class="mb-2">
+                <label class="form-label">新密码（至少 6 位）</label>
+                <input type="password" class="form-control" name="new_password" minlength="6" required autocomplete="new-password">
+              </div>
+              <div class="mb-3">
+                <label class="form-label">确认新密码</label>
+                <input type="password" class="form-control" name="confirm" minlength="6" required autocomplete="new-password">
+              </div>
+              <div class="text-end">
+                <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-key me-1"></i>修改密码</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <main class="content">
       <div class="page-hero">

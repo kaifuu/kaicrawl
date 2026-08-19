@@ -41,6 +41,10 @@ class Task(db.Model):
     name = db.Column(db.String(128), nullable=False)
     source_id = db.Column(db.Integer, db.ForeignKey("sources.id"), nullable=False)
     run_time = db.Column(db.String(8), nullable=False)   # "HH:MM"
+    # 抓取范围（天数）：1=仅当天（默认）；N>1=最近 N 天（含当天）；0=不限（抓列表首页全部）
+    days_back = db.Column(db.Integer, nullable=False, default=1, server_default="1")
+    # 已废弃：仅保留历史库兼容（迁移时按它回填 days_back），新代码一律读写 days_back
+    only_today = db.Column(db.Boolean, nullable=False, default=True, server_default="1")
     enabled = db.Column(db.Boolean, default=True)
     last_run_at = db.Column(db.DateTime)
     last_status = db.Column(db.String(16), default="")   # success / error / running
@@ -54,6 +58,15 @@ class Task(db.Model):
             return int(h), int(m)
         except Exception:
             return 8, 0
+
+    @property
+    def range_label(self):
+        """抓取范围的展示文案：仅当天 / 最近N天（含当天） / 列表全部。"""
+        if self.days_back == 1:
+            return "仅当天"
+        if not self.days_back:
+            return "列表全部"
+        return f"最近{self.days_back}天（含当天）"
 
     def __repr__(self):
         return f"<Task {self.name} @ {self.run_time}>"

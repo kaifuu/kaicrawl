@@ -13,27 +13,42 @@ from config import DATA_DIR, OUTPUT_DIR, EXCEL_PATH, DB_URI, RESOURCE_DIR
 def _ensure_columns():
     """SQLite 轻量迁移：db.create_all 只建缺失的表，不会给已有表加列。
 
-    手动检查 sources 表，缺列则 ALTER TABLE 补上。幂等，可随启动重复执行。
+    手动检查已有表，缺列则 ALTER TABLE 补上。幂等，可随启动重复执行。
     不引入 Alembic，与项目「删 db 重建」的轻量风格一致，且不丢现有数据。
     """
     from sqlalchemy import inspect, text
     insp = inspect(db.engine)
-    if "sources" not in insp.get_table_names():
-        return
-    cols = {c["name"] for c in insp.get_columns("sources")}
-    # sources 表新增列统一在此登记：(列名, DDL 类型与默认值)，启动时自动补齐
-    needed = [
-        ("content_xpath", "VARCHAR(255) DEFAULT ''"),
-        ("list_xpath", "VARCHAR(255) DEFAULT ''"),
-        ("date_xpath", "VARCHAR(255) DEFAULT ''"),
-        ("meta_xpath", "VARCHAR(255) DEFAULT ''"),
-        ("page_url_pattern", "VARCHAR(255) DEFAULT ''"),
-        ("render_mode", "VARCHAR(16) DEFAULT 'static'"),
-    ]
+    # 各表新增列统一在此登记：表名 -> [(列名, DDL 类型与默认值)]，启动时自动补齐
+    needed = {
+        "sources": [
+            ("content_xpath", "VARCHAR(255) DEFAULT ''"),
+            ("list_xpath", "VARCHAR(255) DEFAULT ''"),
+            ("date_xpath", "VARCHAR(255) DEFAULT ''"),
+            ("meta_xpath", "VARCHAR(255) DEFAULT ''"),
+            ("page_url_pattern", "VARCHAR(255) DEFAULT ''"),
+            ("render_mode", "VARCHAR(16) DEFAULT 'static'"),
+        ],
+        "tasks": [
+            ("only_today", "BOOLEAN NOT NULL DEFAULT 1"),
+            ("days_back", "INTEGER NOT NULL DEFAULT 1"),
+        ],
+    }
+    # 新列落地时需要按旧数据回填的，在此登记：表名.列名 -> 回填 SQL（仅在该列本次新加时执行一次）
+    backfills = {
+        "tasks.days_back": "UPDATE tasks SET days_back = CASE WHEN only_today THEN 1 ELSE 0 END",
+    }
+    tables = insp.get_table_names()
     with db.engine.begin() as conn:
-        for name, ddl in needed:
-            if name not in cols:
-                conn.execute(text(f"ALTER TABLE sources ADD COLUMN {name} {ddl}"))
+        for table, columns in needed.items():
+            if table not in tables:
+                continue
+            cols = {c["name"] for c in insp.get_columns(table)}
+            for name, ddl in columns:
+                if name not in cols:
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}"))
+                    sql = backfills.get(f"{table}.{name}")
+                    if sql:
+                        conn.execute(text(sql))
 
 
 def create_app(start_sched=True):

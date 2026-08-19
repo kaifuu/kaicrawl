@@ -2,7 +2,7 @@
 {% from "_pagination.html" import render_pagination %}
 {% block header %}任务管理{% endblock %}
 {% block page_icon %}bi bi-clock-history{% endblock %}
-{% block page_desc %}为数据源创建每日定时抓取任务，支持立即运行与启停。{% endblock %}
+{% block page_desc %}为数据源创建每日定时抓取任务，抓取范围可选当天或最近 N 天（含当天），支持立即运行与启停。{% endblock %}
 {% block content %}
 <div class="toolbar">
   <form method="get" class="d-flex gap-2" style="min-width:260px">
@@ -15,7 +15,7 @@
 <div class="card mb-3"><div class="card-body">
 <h6 class="card-title">新建定时任务（每天在指定时间抓取一个来源）</h6>
 <form method="post" action="{{ url_for('tasks.new') }}" class="row g-2 align-items-end">
-  <div class="col-md-5">
+  <div class="col-md-4">
     <label class="form-label small">数据源</label>
     <select name="source_id" class="form-select" required>
       {% for s in sources %}
@@ -23,7 +23,7 @@
       {% endfor %}
     </select>
   </div>
-  <div class="col-md-3">
+  <div class="col-md-2">
     <label class="form-label small">每日执行时间 (HH:MM)</label>
     <input type="time" name="run_time" class="form-control" value="08:00" required>
   </div>
@@ -32,24 +32,41 @@
     <input name="name" class="form-control" placeholder="留空自动生成">
   </div>
   <div class="col-md-1">
+    <label class="form-label small">抓取天数</label>
+    <input type="number" name="days_back" class="form-control" value="1" min="0" max="30"
+           title="1=仅当天；N=最近 N 天（含当天）；0=不限（列表首页全部）">
+  </div>
+  <div class="col-md-1">
     <button class="btn btn-primary w-100">创建</button>
   </div>
 </form>
-<p class="small-muted mt-2 mb-0">提示：同一来源如需多个时间点，可创建多个任务。</p>
+<p class="small-muted mt-2 mb-0">提示：抓取天数 1=仅当天，N=最近 N 天（含当天），0=不限（列表首页全部）；同一来源如需多个时间点，可创建多个任务。</p>
 </div></div>
 {% endif %}
 
 <div class="card"><div class="card-body p-0">
 <table class="table table-hover mb-0 align-middle">
   <thead><tr>
-    <th>任务名称</th><th>来源</th><th>每日时间</th><th>下次运行</th><th>上次运行</th><th>状态</th><th style="width:1%">操作</th>
+    <th class="text-center" style="width:1%">序号</th>
+    <th>任务名称</th><th>来源</th><th>每日时间</th><th>抓取范围</th><th>下次运行</th><th>上次运行</th><th>状态</th><th style="width:1%">操作</th>
   </tr></thead>
   <tbody>
   {% for t in tasks %}
     <tr>
+      <td class="text-center text-muted small">{{ (pagination.page - 1) * pagination.per_page + loop.index }}</td>
       <td>{{ t.name }}</td>
       <td class="small">[{{ t.source.category }}] {{ t.source.name }}</td>
       <td><code>{{ t.run_time }}</code></td>
+      <td>
+        {% if current_user.has_perm('task:edit') %}
+        <a href="{{ url_for('tasks.edit', tid=t.id) }}"
+           class="badge text-decoration-none {% if t.days_back %}bg-primary{% else %}bg-secondary{% endif %}"
+           title="点击编辑抓取范围">{{ t.range_label }}</a>
+        {% else %}
+          <span class="badge {% if t.days_back %}bg-primary{% else %}bg-secondary{% endif %}">
+            {{ t.range_label }}</span>
+        {% endif %}
+      </td>
       <td class="small-muted">{{ t._next_run or '—' }}</td>
       <td class="small-muted">
         {{ t.last_run_at.strftime('%m-%d %H:%M') if t.last_run_at else '—' }}
@@ -59,6 +76,7 @@
       <td>{% if t.enabled %}<span class="badge bg-success">启用</span>{% else %}<span class="badge bg-secondary">禁用</span>{% endif %}</td>
       <td>
         <div class="d-flex gap-1">
+          {% if current_user.has_perm('task:edit') %}<a href="{{ url_for('tasks.edit', tid=t.id) }}" class="btn btn-sm btn-outline-secondary" title="编辑任务">编辑</a>{% endif %}
           {% if current_user.has_perm('task:run') %}<form method="post" action="{{ url_for('tasks.run', tid=t.id) }}"><button class="btn btn-sm btn-outline-primary">运行</button></form>{% endif %}
           {% if current_user.has_perm('task:toggle') %}<form method="post" action="{{ url_for('tasks.toggle', tid=t.id) }}"><button class="btn btn-sm btn-outline-warning">{% if t.enabled %}禁用{% else %}启用{% endif %}</button></form>{% endif %}
           {% if current_user.has_perm('task:delete') %}<form method="post" action="{{ url_for('tasks.delete', tid=t.id) }}" onsubmit="return confirm('删除该任务？');"><button class="btn btn-sm btn-outline-danger">删除</button></form>{% endif %}
@@ -66,7 +84,7 @@
       </td>
     </tr>
   {% else %}
-    <tr><td colspan="7" class="empty-state"><span class="es-ico"><i class="bi bi-calendar2-x"></i></span><span class="es-msg">暂无任务，请在上方创建</span></td></tr>
+    <tr><td colspan="9" class="empty-state"><span class="es-ico"><i class="bi bi-calendar2-x"></i></span><span class="es-msg">暂无任务，请在上方创建</span></td></tr>
   {% endfor %}
   </tbody>
 </table>

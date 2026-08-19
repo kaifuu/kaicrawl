@@ -34,6 +34,7 @@
 <div class="card"><div class="card-body p-0">
 <table class="table table-sm table-hover mb-0 align-middle src-table">
   <thead><tr>
+    <th class="text-center" style="width:1%">序号</th>
     <th style="width:1%">分类</th>
     <th>名称</th>
     <th>URL</th>
@@ -42,6 +43,7 @@
   <tbody>
   {% for s in sources %}
     <tr class="{{ '' if s.enabled else 'src-row-off' }}">
+      <td class="text-center text-muted small">{{ (pagination.page - 1) * pagination.per_page + loop.index }}</td>
       <td class="src-cat-cell"><i class="bi bi-folder-fill src-cat-icon"></i><span class="src-cat-name">{{ s.category }}</span></td>
       <td class="src-name-cell">
         <span class="src-ico t-{{ s.source_type }}"><i class="bi {{ type_ico[s.source_type] or 'bi-globe2' }}"></i></span>
@@ -77,7 +79,7 @@
       </td>
     </tr>
   {% else %}
-    <tr><td colspan="4" class="empty-state"><span class="es-ico"><i class="bi bi-cloud-slash"></i></span><span class="es-msg">没有匹配的数据源</span></td></tr>
+    <tr><td colspan="5" class="empty-state"><span class="es-ico"><i class="bi bi-cloud-slash"></i></span><span class="es-msg">没有匹配的数据源</span></td></tr>
   {% endfor %}
   </tbody>
 </table>

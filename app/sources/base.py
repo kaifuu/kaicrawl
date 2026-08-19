@@ -324,13 +324,15 @@ class GenericGovParser(BaseParser):
                 matches = doc.xpath(xpath)
                 el = next((m for m in matches if hasattr(m, "tag")), None)
                 if el is not None:
-                    # 剔除阅读量/点击数计数节点与脚本样式，避免数字混进来源名
+                    # 剔除阅读量/点击数计数节点、语音播报控件与脚本样式，避免混进来源名
                     for junk in el.xpath(
                             ".//script | .//style | .//*[contains(@class,'view')"
                             " or contains(@class,'hit') or contains(@class,'count')"
-                            " or contains(@class,'click')]"):
+                            " or contains(@class,'click') or contains(@class,'voice')]"):
                         junk.getparent().remove(junk)
-                    text = clean_text(el.text_content())
+                    # 兄弟节点文本以空格连接：元信息行的各 span 间常无分隔符，
+                    # text_content() 直连会把「来源：xx」「时间」「播报」粘成一串
+                    text = clean_text(" ".join(t for t in el.itertext() if t.strip()))
                     if text:
                         return text, True
                     _log.warning("meta_xpath 命中的元素无文本（可能与浏览器节点口径有偏差），回退默认选择器：%s", xpath)
@@ -339,7 +341,7 @@ class GenericGovParser(BaseParser):
             except Exception as e:
                 _log.warning("meta_xpath 执行失败，回退默认选择器：%s -> %s", xpath, e)
         el = self._select_first(soup, self.author_selectors)
-        return (clean_text(el.get_text()) if el else ""), False
+        return (clean_text(el.get_text(" ")) if el else ""), False
 
     def fetch_detail(self, url):
         wait_x = (getattr(self.source, "content_xpath", "") or "").strip() or None

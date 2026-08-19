@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block header %}编辑任务{% endblock %}
+{% block page_icon %}bi bi-pencil-square{% endblock %}
+{% block page_desc %}调整任务的名称、数据源、每日执行时间与抓取范围，保存后调度即时生效。{% endblock %}
+{% block content %}
+<div class="card"><div class="card-body">
+<form method="post">
+  <div class="row g-3">
+    <div class="col-md-4">
+      <label class="form-label">任务名称</label>
+      <input class="form-control" name="name"
+             value="{{ task.name }}" placeholder="留空按「分类-来源 时间」自动生成">
+    </div>
+    <div class="col-md-4">
+      <label class="form-label">数据源 *</label>
+      <select class="form-select" name="source_id" required>
+        {% for s in sources %}
+          <option value="{{ s.id }}" {{ 'selected' if s.id==task.source_id }}>
+            [{{ s.category }}] {{ s.name }}{% if not s.enabled %}（已禁用）{% endif %}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-4">
+      <label class="form-label">每日执行时间 (HH:MM) *</label>
+      <input type="time" class="form-control" name="run_time" value="{{ task.run_time }}" required>
+      <div class="form-text">下次运行：{{ task._next_run or '—' }}</div>
+    </div>
+    <div class="col-md-6">
+      <label class="form-label" for="db">抓取范围（天数）</label>
+      <div class="input-group" style="max-width:220px">
+        <span class="input-group-text">最近</span>
+        <input type="number" class="form-control" name="days_back" id="db"
+               value="{{ task.days_back if task.days_back is not none else 1 }}" min="0" max="30">
+        <span class="input-group-text">天</span>
+      </div>
+      <div class="form-text">1=仅当天（默认）；N=最近 N 天（含当天，如 3 表示今天起往前 3 天）；0=不限（抓列表首页全部）。范围内多于一页自动翻页补全。</div>
+    </div>
+    <div class="col-md-6">
+      <div class="form-check form-switch">
+        <input class="form-check-input" type="checkbox" name="enabled" id="en" {{ 'checked' if task.enabled }}>
+        <label class="form-check-label" for="en">启用</label>
+      </div>
+      <div class="form-text">禁用后不再定时执行，配置保留。</div>
+    </div>
+    <div class="col-12">
+      <button class="btn btn-primary">保存</button>
+      <a href="{{ url_for('tasks.index') }}" class="btn btn-link">返回</a>
+    </div>
+  </div>
+</form>
+</div></div>
+{% endblock %}

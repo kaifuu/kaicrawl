@@ -16,6 +16,7 @@ greenlet==3.0.3
 typing-extensions==4.12.2
 APScheduler==3.10.4
 tzlocal==5.2
+pytz==2024.1
 requests==2.31.0
 urllib3==2.2.2
 certifi==2024.7.4

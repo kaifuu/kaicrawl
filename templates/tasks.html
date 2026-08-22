@@ -89,5 +89,5 @@
   </tbody>
 </table>
 </div></div>
-{{ render_pagination(pagination, 'tasks.index', {'q': q}) }}
+{{ render_pagination(pagination, 'tasks.index', {'q': q}, per_page=per_page, per_page_options=per_page_options) }}
 {% endblock %}

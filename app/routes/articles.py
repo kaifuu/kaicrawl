@@ -269,54 +269,85 @@ def manual_import():
     return render_template("import.html", sources=sources)
 
 
+# URL 批量导入的默认 XPath（详情页的正文/标题/作者/日期区域），页面上可按站点调整
+IMPORT_XPATH_DEFAULTS = {
+    "content_xpath": "/html/body/div[2]/div[2]/div[2]/div/div[1]",
+    "title_xpath": "/html/body/div[2]/div[2]/div[2]/div/div[1]/h1/span",
+    "author_xpath": "/html/body/div[2]/div[2]/div[2]/div/div[1]/div[1]/span[1]/a",
+    "date_xpath": "/html/body/div[2]/div[2]/div[2]/div/div[1]/div[1]/span[2]/em[1]",
+}
+
+
+def _import_one(parser, source, u, xpaths):
+    """抓取单个 URL 并生成 WORD 落库；返回 (url, ok, 说明)。
+
+    解析路径按 URL 自动分流：公众号链接（mp.weixin.qq.com）无视 XPath，
+    直接走来源解析器自身的 fetch_detail（WechatParser 等专用实现）；
+    其它链接在正文 XPath 非空时走 fetch_detail_custom（按显式 XPath 解析），
+    否则同样回退解析器默认行为。
+    """
+    try:
+        # 同来源同 URL 去重
+        if Article.query.filter_by(source_id=source.id, url=u).first():
+            return u, False, "已存在，跳过"
+        use_custom = ((xpaths.get("content_xpath") or "").strip()
+                      and hasattr(parser, "fetch_detail_custom")
+                      and "mp.weixin.qq.com" not in u)
+        if use_custom:
+            detail = parser.fetch_detail_custom(
+                u, title_xpath=xpaths.get("title_xpath", ""),
+                author_xpath=xpaths.get("author_xpath", ""),
+                date_xpath=xpaths.get("date_xpath", ""),
+                content_xpath=xpaths.get("content_xpath", ""))
+        else:
+            detail = parser.fetch_detail(u)
+        docx_path, images_dir = docx_writer.generate(
+            source, detail, date.today().isoformat())
+        db.session.add(Article(
+            source_id=source.id,
+            title=(detail.get("title") or "未命名")[:500],
+            author=(detail.get("author") or "")[:128],
+            publish_date=(detail.get("publish_date") or "")[:32],
+            url=u,
+            docx_path=os.path.relpath(docx_path, OUTPUT_DIR).replace("\\", "/"),
+            images_dir=os.path.relpath(images_dir, OUTPUT_DIR).replace("\\", "/"),
+            status="ok", crawled_at=datetime.now(),
+        ))
+        db.session.commit()
+        return u, True, (detail.get("title") or "")[:60]
+    except Exception as e:
+        db.session.rollback()
+        return u, False, str(e)[:200]
+
+
 @bp.route("/import-urls", methods=["GET", "POST"])
 def import_urls():
-    """URL 批量导入：粘贴多个文章链接（如公众号），自动抓正文生成 WORD。"""
+    """URL 批量导入：粘贴多个文章链接，按 XPath 或来源解析器抓正文生成 WORD。"""
     sources = Source.query.order_by(Source.category, Source.name).all()
+    xpaths = dict(IMPORT_XPATH_DEFAULTS)
     if request.method == "POST":
         source_id = request.form.get("source_id", type=int)
         raw = request.form.get("urls") or ""
         urls = [u.strip() for u in re.split(r"[\r\n]+", raw) if u.strip()]
+        # 表单里的 XPath 以提交为准（可清空正文 XPath 退回解析器默认行为）
+        xpaths = {k: (request.form.get(k) or "").strip()
+                  for k in IMPORT_XPATH_DEFAULTS}
         source = db.session.get(Source, source_id) if source_id else None
         if not source:
             flash("请选择归入的来源", "danger")
             return render_template("import_urls.html", sources=sources,
-                                   source_id=source_id, urls=raw)
+                                   source_id=source_id, urls=raw, xpaths=xpaths)
         if not urls:
             flash("请粘贴至少一个文章链接", "danger")
             return render_template("import_urls.html", sources=sources,
-                                   source_id=source_id, urls=raw)
+                                   source_id=source_id, urls=raw, xpaths=xpaths)
 
         from ..sources import get_parser
         parser = get_parser(source)
-        results, ok_count = [], 0
-        for u in urls:
-            try:
-                # 同来源同 URL 去重
-                if Article.query.filter_by(source_id=source.id, url=u).first():
-                    results.append((u, False, "已存在，跳过"))
-                    continue
-                detail = parser.fetch_detail(u)
-                docx_path, images_dir = docx_writer.generate(
-                    source, detail, date.today().isoformat())
-                db.session.add(Article(
-                    source_id=source.id,
-                    title=(detail.get("title") or "未命名")[:500],
-                    author=(detail.get("author") or "")[:128],
-                    publish_date=(detail.get("publish_date") or "")[:32],
-                    url=u,
-                    docx_path=os.path.relpath(docx_path, OUTPUT_DIR).replace("\\", "/"),
-                    images_dir=os.path.relpath(images_dir, OUTPUT_DIR).replace("\\", "/"),
-                    status="ok", crawled_at=datetime.now(),
-                ))
-                db.session.commit()
-                results.append((u, True, (detail.get("title") or "")[:60]))
-                ok_count += 1
-            except Exception as e:
-                db.session.rollback()
-                results.append((u, False, str(e)[:200]))
+        results = [_import_one(parser, source, u, xpaths) for u in urls]
+        ok_count = sum(1 for _, ok, _ in results if ok)
         flash(f"完成：成功 {ok_count} 篇，失败 {len(urls) - ok_count} 篇",
               "success" if ok_count else "danger")
         return render_template("import_urls.html", sources=sources,
-                               source_id=source_id, results=results)
-    return render_template("import_urls.html", sources=sources)
+                               source_id=source_id, results=results, xpaths=xpaths)
+    return render_template("import_urls.html", sources=sources, xpaths=xpaths)

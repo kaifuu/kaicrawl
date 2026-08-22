@@ -25,6 +25,9 @@ from .utils import http_get
 
 IMG_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"}
 
+# python-docx 能直接插入的图片格式；webp 等现代格式需先转 PNG（UnrecognizedImageError）
+_DOCX_IMG_FORMATS = {"JPEG", "PNG", "GIF", "BMP", "TIFF"}
+
 # 图片文件头魔数，用于校验下载内容确实是图片（防止把 404/HTML 错误页误存为图片）
 _IMG_MAGICS = (b"\xff\xd8\xff", b"\x89PNG\r\n\x1a\n", b"GIF87a", b"GIF89a", b"BM")
 
@@ -197,6 +200,18 @@ def _download_image(url, images_dir, seq, name_prefix=""):
         path = os.path.join(images_dir, f"{prefix}_{seq}{ext}")
         with open(path, "wb") as f:
             f.write(data)
+        # webp 等格式 WORD 插不进去（python-docx 不识别），统一转 PNG 落盘
+        png_path = ""
+        try:
+            with Image.open(path) as im:
+                if im.format not in _DOCX_IMG_FORMATS:
+                    png_path = os.path.splitext(path)[0] + ".png"
+                    im.save(png_path, "PNG")
+        except Exception:
+            png_path = ""   # 转换失败保留原文件：插入阶段再降级为占位文本
+        if png_path:
+            os.remove(path)
+            path = png_path
         return path
     except Exception:
         return None

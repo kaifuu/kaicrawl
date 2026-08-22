@@ -1,10 +1,10 @@
 {% extends "base.html" %}
 {% block header %}URL 批量导入{% endblock %}
 {% block page_icon %}bi bi-link-45deg{% endblock %}
-{% block page_desc %}批量粘贴公众号文章链接，自动抓取正文并生成 WORD。{% endblock %}
+{% block page_desc %}批量粘贴文章链接，按 XPath 解析区域自动抓取正文并生成 WORD。{% endblock %}
 {% block content %}
 <div class="card"><div class="card-body">
-  <div class="hint-card"><i class="bi bi-info-circle-fill"></i><span>从微信复制文章链接（<code>mp.weixin.qq.com/s/xxx</code>），每行一个粘贴后提交。系统自动抓取正文/图片并生成 WORD，适用于<strong>公众号</strong>等无列表接口的来源。</span></div>
+  <div class="hint-card"><i class="bi bi-info-circle-fill"></i><span>每行粘贴一个文章链接。<strong>公众号链接（mp.weixin.qq.com）自动走专用解析器</strong>，无需关心下方 XPath；其它站点按下方 XPath 定位<strong>正文/标题/作者/日期</strong>区域（可按站点从浏览器 F12 复制调整）；<strong>清空「正文区域 XPath」</strong>则全部退回所选来源解析器的默认行为。</span></div>
   <form method="post">
     <div class="row g-3">
       <div class="col-md-6">
@@ -21,7 +21,28 @@
       <div class="col-12">
         <label class="form-label">文章链接（每行一个）</label>
         <textarea class="form-control" name="urls" rows="10"
-                  placeholder="https://mp.weixin.qq.com/s/xxxx&#10;https://mp.weixin.qq.com/s/yyyy">{{ urls or '' }}</textarea>
+                  placeholder="https://example.gov.cn/art/2026/8/19/art_123_456.html&#10;https://mp.weixin.qq.com/s/yyyy">{{ urls or '' }}</textarea>
+      </div>
+      <div class="col-12"><hr class="mt-2 mb-2"></div>
+      <div class="col-md-6">
+        <label class="form-label"><i class="bi bi-text-paragraph"></i> 正文区域 XPath *</label>
+        <input class="form-control font-monospace" name="content_xpath"
+               value="{{ xpaths.content_xpath }}" placeholder="必填；清空则用来源解析器默认行为">
+      </div>
+      <div class="col-md-6">
+        <label class="form-label"><i class="bi bi-type-h1"></i> 标题区域 XPath</label>
+        <input class="form-control font-monospace" name="title_xpath"
+               value="{{ xpaths.title_xpath }}" placeholder="未命中时回退解析器启发式">
+      </div>
+      <div class="col-md-6">
+        <label class="form-label"><i class="bi bi-person"></i> 作者区域 XPath</label>
+        <input class="form-control font-monospace" name="author_xpath"
+               value="{{ xpaths.author_xpath }}" placeholder="未命中时回退解析器启发式">
+      </div>
+      <div class="col-md-6">
+        <label class="form-label"><i class="bi bi-calendar3"></i> 日期区域 XPath</label>
+        <input class="form-control font-monospace" name="date_xpath"
+               value="{{ xpaths.date_xpath }}" placeholder="未命中时回退解析器启发式">
       </div>
       <div class="col-12">
         <button class="btn btn-primary"><i class="bi bi-cloud-download"></i> 开始抓取</button>

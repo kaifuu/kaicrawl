@@ -376,6 +376,100 @@ class GenericGovParser(BaseParser):
             "base_url": url,
         }
 
+    def fetch_detail_custom(self, url, title_xpath="", author_xpath="",
+                            date_xpath="", content_xpath=""):
+        """按调用方显式给出的 XPath 解析详情页（URL 批量导入用）。
+
+        四个 XPath 均为绝对/相对 lxml 表达式：正文区域必填，未命中抛 ParserError；
+        标题/作者/日期未填或未命中时回退本解析器的启发式。正文区域命中后，
+        会把标题/作者/日期命中的节点及其在正文容器内的最浅祖先（如 h1、
+        元信息行 div）从正文中剔除，避免标题和元信息重复混进正文块。
+        """
+        if not (content_xpath or "").strip():
+            raise ParserError("未填写正文区域 XPath")
+
+        resp_text = self._page_text(url, wait_xpath=content_xpath.strip())
+        doc = lxml.html.fromstring(resp_text or "")
+
+        def _first_text(xpath):
+            """首个命中元素的全文文本；未填/未命中/抛错一律返回空串走回退。"""
+            xpath = (xpath or "").strip()
+            if not xpath:
+                return ""
+            try:
+                m = next((x for x in doc.xpath(xpath) if hasattr(x, "tag")), None)
+            except Exception:
+                return ""
+            return clean_text(m.text_content()) if m is not None else ""
+
+        title = _first_text(title_xpath)
+        author = _first_text(author_xpath)
+        date_raw = _first_text(date_xpath)
+        publish_date = ""
+        if date_raw:
+            m = DATE_RE.search(date_raw)
+            if m:
+                y, mo, d = m.groups()
+                publish_date = f"{y}-{int(mo):02d}-{int(d):02d}"
+
+        try:
+            matches = doc.xpath(content_xpath.strip())
+        except Exception as e:
+            raise ParserError(f"正文 XPath 执行失败：{content_xpath} -> {e}")
+        el = next((x for x in matches if hasattr(x, "tag")), None)
+        if el is None:
+            raise ParserError(f"正文 XPath 未命中：{content_xpath}")
+
+        # 从正文容器里剔除标题/作者/日期节点（连同其容器内最浅祖先，如 h1、元信息 div）
+        drop = set()
+        for xp in (title_xpath, author_xpath, date_xpath):
+            xp = (xp or "").strip()
+            if not xp:
+                continue
+            try:
+                hit = [x for x in doc.xpath(xp) if hasattr(x, "tag")]
+            except Exception:
+                continue
+            for node in hit:
+                cur = node
+                while cur is not None and cur is not el:
+                    if cur.getparent() is el:
+                        drop.add(cur)
+                        break
+                    cur = cur.getparent()
+        for node in drop:
+            parent = node.getparent()
+            if parent is not None:
+                parent.remove(node)
+
+        frag = lxml_etree.tostring(el, encoding="unicode")
+        node = BeautifulSoup(frag, "lxml")
+        container = node.body or node
+        kids = container.find_all(recursive=False)
+        container = kids[0] if len(kids) == 1 else container
+        blocks = self._content_to_blocks(container, base_url=url) if container else []
+
+        # 标题/作者/日期未命中 XPath 时，回退到本解析器的启发式
+        if not (title or author or publish_date) or not blocks:
+            soup = BeautifulSoup(resp_text or "", "lxml")
+            if not title:
+                t = self._select_first(soup, self.title_selectors)
+                title = clean_text(t.get_text()) if t else \
+                    clean_text(soup.title.get_text() if soup.title else "")
+            if not author:
+                meta_text, _ = self._meta_text(soup, resp_text)
+                author = self._extract_author(meta_text)
+            if not publish_date:
+                publish_date = self._extract_date(soup)
+
+        return {
+            "title": title,
+            "author": author,
+            "publish_date": publish_date,
+            "blocks": blocks,
+            "base_url": url,
+        }
+
     def _content_to_blocks(self, container, base_url=None):
         """按文档顺序提取正文文本块与图片。
 

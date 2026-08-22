@@ -13,6 +13,7 @@ bp = Blueprint("tasks", __name__)
 
 TIME_RE = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
 MAX_DAYS_BACK = 30
+PER_PAGE_OPTIONS = (10, 15, 30, 50)
 
 
 def _parse_days_back(raw):
@@ -28,16 +29,20 @@ def _parse_days_back(raw):
 def index():
     q = (request.args.get("q") or "").strip()
     page = request.args.get("page", 1, type=int)
+    per_page = request.args.get("per_page", 15, type=int)
+    if per_page not in PER_PAGE_OPTIONS:
+        per_page = 15
     query = Task.query
     if q:
         query = query.filter(Task.name.like(f"%{q}%"))
     pagination = query.order_by(Task.id.desc()).paginate(
-        page=page, per_page=15, error_out=False)
+        page=page, per_page=per_page, error_out=False)
     for t in pagination.items:
         t._next_run = scheduler_jobs.next_run_time(t.id)
     sources = Source.query.filter_by(enabled=True).order_by(Source.category, Source.name).all()
     return render_template("tasks.html", tasks=pagination.items, sources=sources,
-                           q=q, pagination=pagination)
+                           q=q, pagination=pagination,
+                           per_page=per_page, per_page_options=PER_PAGE_OPTIONS)
 
 
 @bp.route("/new", methods=["POST"])

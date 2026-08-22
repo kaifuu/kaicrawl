@@ -30,6 +30,13 @@ BUILD = ROOT / "build"
 VENV = BUILD / "venv-win7"
 WIN7_MINORS = (8, 9)   # Win7 支持的 Python 大版本：3.8 / 3.9
 
+# pip 子进程统一环境与镜像：
+# - NO_PROXY=* 强制直连：系统代理开着时，venv 里的老 pip（urllib3 旧版）走 https 代理
+#   会触发「check_hostname requires server_hostname」崩溃（TLS-in-TLS bug）；
+# - 默认清华镜像：pypi.org 直连慢/易超时；可用环境变量 KAI_PIP_INDEX 换源或设 "" 用官方源。
+PIP_ENV = dict(os.environ, NO_PROXY="*", no_proxy="*")
+PIP_INDEX = os.environ.get("KAI_PIP_INDEX") or "https://pypi.tuna.tsinghua.edu.cn/simple"
+
 
 def _ver(py: Path):
     try:
@@ -109,12 +116,16 @@ def main():
 
         if not args.fast:
             print("安装锁定依赖（requirements-win7.txt）...")
-            subprocess.run([str(venv_py), "-m", "pip", "install", "-q", "--upgrade", "pip"], check=True)
             subprocess.run([str(venv_py), "-m", "pip", "install", "-q",
-                            "-r", str(ROOT / "requirements-win7.txt")], check=True)
+                            "--upgrade", "pip", "-i", PIP_INDEX],
+                           env=PIP_ENV, check=True)
+            subprocess.run([str(venv_py), "-m", "pip", "install", "-q", "-i", PIP_INDEX,
+                            "-r", str(ROOT / "requirements-win7.txt")],
+                           env=PIP_ENV, check=True)
             # 3.8/3.9 用 PyInstaller 5.x（6.x 引导器不再兼容 Win7）；其它版本装最新
             pin = "pyinstaller==5.13.2" if _ver(venv_py) in ("3.8", "3.9") else "pyinstaller"
-            subprocess.run([str(venv_py), "-m", "pip", "install", "-q", pin], check=True)
+            subprocess.run([str(venv_py), "-m", "pip", "install", "-q", "-i", PIP_INDEX, pin],
+                           env=PIP_ENV, check=True)
 
     print("开始 PyInstaller 打包（onedir，输出 dist/KaiCrawl/）...")
     subprocess.run([str(venv_py), "-m", "PyInstaller",

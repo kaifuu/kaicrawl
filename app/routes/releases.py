@@ -19,11 +19,11 @@ from flask import (Blueprint, render_template, request, redirect, url_for,
 from ..extensions import db
 from ..models import Release, ReleaseLine
 from ..auth import permission_required
-from config import BASE_DIR, APP_VERSION
+from config import BASE_DIR, APP_VERSION, PORT
 
 bp = Blueprint("releases", __name__)
 
-CHANNEL_LABELS = {"win7": "Win7 正式", "smoke": "冒烟验证"}
+CHANNEL_LABELS = {"win7": "Win7 正式", "win10": "Win10 正式", "smoke": "冒烟验证"}
 PER_PAGE = 10
 
 
@@ -47,6 +47,16 @@ def suggest_version():
     if not rel:
         return _norm_version(APP_VERSION) or "1.0.0"
     return _bump_patch(_norm_version(rel.version) or "1.0.0")
+
+
+def _norm_port(raw):
+    """端口归一化：空/缺省返回 None（EXE 用默认 5000）；非法返回 -1 供报错。"""
+    v = (raw or "").strip()
+    if not v:
+        return None
+    if not v.isdigit() or not 1 <= int(v) <= 65535:
+        return -1
+    return int(v)
 
 
 def _find_toolchain():
@@ -99,7 +109,8 @@ def _run_build(app, rid, channel):
 
 def _build(rid, channel):
     rel = db.session.get(Release, rid)
-    _log(rid, f"开始构建 v{rel.version}（{CHANNEL_LABELS.get(channel, channel)}）", "info")
+    port_label = f"，启动端口 {rel.port}" if rel.port else ""
+    _log(rid, f"开始构建 v{rel.version}（{CHANNEL_LABELS.get(channel, channel)}{port_label}）", "info")
 
     script = os.path.join(BASE_DIR, "build_exe.py")
     if not os.path.isfile(script):
@@ -107,6 +118,7 @@ def _build(rid, channel):
 
     if channel == "smoke":
         # 冒烟渠道用当前解释器：先确保 PyInstaller 可用，缺则自动装
+        # （win10 渠道的依赖自检在 build_exe.py 内做，含 playwright + 浏览器）
         chk = subprocess.run([sys.executable, "-c", "import PyInstaller"],
                              capture_output=True)
         if chk.returncode != 0:
@@ -115,9 +127,9 @@ def _build(rid, channel):
                            check=True)
             _log(rid, "PyInstaller 安装完成", "success")
 
-    cmd = [sys.executable, "-u", script, "--version", rel.version]
-    if channel == "smoke":
-        cmd.append("--smoke")
+    cmd = [sys.executable, "-u", script, "--version", rel.version, "--channel", channel]
+    if rel.port:
+        cmd += ["--port", str(rel.port)]
 
     env = os.environ.copy()
     env["PYTHONIOENCODING"] = "utf-8"       # 中文输出按 UTF-8 读，避免 GBK 乱码
@@ -168,7 +180,7 @@ def _build(rid, channel):
                 pass
 
     py_ver = ""
-    if channel == "smoke":
+    if channel in ("smoke", "win10"):
         import platform
         py_ver = platform.python_version()
     else:
@@ -206,7 +218,8 @@ def index():
         current_version=(latest_success.version if latest_success else APP_VERSION),
         latest=latest_success, building=building, frozen=frozen,
         toolchain=str(toolchain) if toolchain else "",
-        suggest=suggest_version(), channel_labels=CHANNEL_LABELS)
+        suggest=suggest_version(), channel_labels=CHANNEL_LABELS,
+        cur_port=PORT, suggest_port=PORT + 1)
 
 
 @bp.route("/build", methods=["POST"])
@@ -239,6 +252,13 @@ def build():
         return redirect(url_for("releases.index"))
     if channel not in CHANNEL_LABELS:
         channel = "win7"
+    port = _norm_port(request.form.get("port"))
+    if port == -1:
+        msg = "启动端口须为 1-65535 的数字（留空用默认 5000）"
+        if is_fetch:
+            return jsonify({"ok": False, "error": msg}), 400
+        flash(msg, "error")
+        return redirect(url_for("releases.index"))
     dup = (Release.query.filter_by(version=version, channel=channel,
                                    status="success").first())
     if dup:
@@ -248,7 +268,7 @@ def build():
         flash(msg, "warning")
         return redirect(url_for("releases.index"))
 
-    rel = Release(version=version, channel=channel, note=note, status="building")
+    rel = Release(version=version, channel=channel, note=note, status="building", port=port)
     db.session.add(rel)
     db.session.commit()
 

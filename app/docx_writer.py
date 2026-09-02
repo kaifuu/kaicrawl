@@ -4,11 +4,16 @@
 规范：
   标题：加粗 / 宋体 / 五号(10.5pt) / 居中 / 单倍行距
   正文：首行空两格 / 宋体 / 五号 / 左对齐 / 单倍行距
-  作者：单位动态 -> 「各单位」；其他用原作者（文章页「来源：xxx」抽取值亦计入作者）
+  元信息行（居中）：时间：YYYY-MM-DD　　来源：xxx　　作者：yyy
+    - 三项均取自文章页对应 XPath 区域的提取值，哪项没取到就不显示
+    - 时间与来源之间、来源与作者之间各空两格（两个全角空格）
+    - 作者未配置（提取值为空且无作者策略）则不显示「作者：」段
+    - 时间统一 YYYY-MM-DD，原文带时分的（2026-08-12 16:28）自动去掉
   图片：png/jpg，按原文位置插入，并单独保存到当天目录的 images 子目录
 """
 import base64
 import os
+import re
 from concurrent.futures import ThreadPoolExecutor
 
 from docx import Document
@@ -88,11 +93,11 @@ def _add_title(doc, text):
 
 
 def _add_meta(doc, text):
-    """作者/日期行：右对齐，宋体五号。"""
+    """时间/来源/作者元信息行：居中，宋体五号，单倍行距。"""
     if not text:
         return
     p = doc.add_paragraph()
-    p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     _set_single_spacing(p)
     run = p.add_run(text)
     _set_run_font(run)
@@ -218,20 +223,39 @@ def _download_image(url, images_dir, seq, name_prefix=""):
 
 
 def _resolve_author(source, detail):
-    """作者规则：单位动态 -> 各单位；其他 -> 原作者（含文章页「来源：xxx」抽取值）。"""
+    """作者规则：作者策略（如单位动态 -> 各单位）优先；否则取文章页作者 XPath 的提取值。
+
+    未配置作者 XPath 的来源 detail["author"] 为空（解析器侧严格按配置，不再
+    关键词猜测），此时 WORD 不显示「作者：」段。
+    """
     if source.author_policy:
         return source.author_policy
     return (detail.get("author") or "").strip()
+
+
+def _norm_publish_date(text):
+    """统一 YYYY-MM-DD：从文本提取日期部分（原文带时分的去掉时分），识别失败原样返回。"""
+    text = (text or "").strip()
+    if not text:
+        return ""
+    m = re.search(r"(20\d{2})[-/年.](\d{1,2})[-/月.](\d{1,2})", text)
+    if m:
+        return f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+    return text
 
 
 def generate(source, detail, date_str):
     """生成单篇文章的 WORD 文件。
 
     返回 (docx_abs_path, images_abs_dir)。
-    落盘路径：OUTPUT_DIR/<分类>/<date>/<标题>.docx，图片存于同目录 images/。
+    落盘路径：OUTPUT_DIR/<分类>/<文章发布日期>/<标题>.docx，图片存于同目录 images/；
+    文章无发布日期（或无法识别成 YYYY-MM-DD）时按 date_str（运行日）存放。
     """
     category_dir = safe_filename(source.category) or "未分类"
-    out_dir = os.path.join(OUTPUT_DIR, category_dir, date_str)
+    # 归档目录用文章自己的发布日期；_norm_publish_date 识别失败会原样返回，须校验格式
+    pub = _norm_publish_date(detail.get("publish_date") or "")
+    day_dir = pub if re.fullmatch(r"20\d{2}-\d{2}-\d{2}", pub or "") else date_str
+    out_dir = os.path.join(OUTPUT_DIR, category_dir, day_dir)
     images_dir = os.path.join(out_dir, "images")
     os.makedirs(out_dir, exist_ok=True)
 
@@ -250,13 +274,19 @@ def generate(source, detail, date_str):
 
     _add_title(doc, title)
 
+    # 元信息行：时间/来源/作者 各自独立，取不到就不显示该段；日期统一 YYYY-MM-DD
     author = _resolve_author(source, detail)
+    source_name = (detail.get("source_name") or "").strip()
+    pub_date = _norm_publish_date(detail.get("publish_date"))
     meta_parts = []
+    if pub_date:
+        meta_parts.append(f"时间：{pub_date}")
+    if source_name:
+        meta_parts.append(f"来源：{source_name}")
     if author:
         meta_parts.append(f"作者：{author}")
-    if detail.get("publish_date"):
-        meta_parts.append(detail["publish_date"])
-    _add_meta(doc, "  ".join(meta_parts))
+    # 时间、来源、作者之间空两格（两个全角空格）
+    _add_meta(doc, "　　".join(meta_parts))
 
     # 第一遍：按块顺序给图片编号，并发预下载全部图片（_download_image 无状态、
     # 文件名含 img_prefix 互不冲突；序号/失败占号规则与旧的串行实现一致）

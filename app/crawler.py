@@ -233,6 +233,7 @@ def run_source(source_id, task_id=None, overwrite=False, since_date=None, limit=
                         source_id=source.id,
                         title=(detail.get("title") or "无标题")[:500],
                         author=(detail.get("author") or "")[:128],
+                        source_name=(detail.get("source_name") or "")[:128],
                         publish_date=(detail.get("publish_date") or "")[:32],
                         url=url,
                         docx_path=os.path.relpath(docx_path, OUTPUT_DIR).replace("\\", "/"),
@@ -266,7 +267,10 @@ def run_source(source_id, task_id=None, overwrite=False, since_date=None, limit=
             db.session.commit()
         finally:
             # 停止/异常时弃置在途预取（浪费 ≤ 窗口数）；已提交的渲染照常完成，不毒化渲染线程
-            pool.shutdown(wait=False, cancel_futures=True)
+            try:
+                pool.shutdown(wait=False, cancel_futures=True)
+            except TypeError:
+                pool.shutdown(wait=False)   # Python 3.8（Win7 包）无 cancel_futures 参数
         processed = new_count + overwritten + repaired + failed
         if stopped:
             log.status = "stopped"

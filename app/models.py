@@ -17,9 +17,13 @@ class Source(db.Model):
     parser_key = db.Column(db.String(64), nullable=False)             # 映射到解析器插件
     author_policy = db.Column(db.String(64), default="")              # 单位动态 -> 「各单位」
     content_xpath = db.Column(db.String(255), default="")             # 详情页正文区域 XPath，留空=用解析器默认选择器
+    content_xpath_alt = db.Column(db.String(255), default="")          # 正文区域 XPath 备选：主 XPath 未命中时尝试（同站多模板）
     list_xpath = db.Column(db.String(255), default="")                # 列表页文章列表区域 XPath，留空=解析器默认启发式
     date_xpath = db.Column(db.String(255), default="")                # 列表项日期 XPath（相对条目容器），留空=启发式
-    meta_xpath = db.Column(db.String(255), default="")                # 详情页「时间+来源」元信息行 XPath，留空=用解析器默认选择器
+    meta_xpath = db.Column(db.String(255), default="")                # 已废弃（旧版「时间+来源」混合行），仅作时间/来源的兜底
+    time_xpath = db.Column(db.String(255), default="")                # 详情页发布时间 XPath，取值统一 YYYY-MM-DD（自动去掉时分）
+    source_xpath = db.Column(db.String(255), default="")              # 详情页来源 XPath（文章页「来源：xxx」）
+    author_xpath = db.Column(db.String(255), default="")              # 详情页作者 XPath；留空=WORD 不显示作者
     page_url_pattern = db.Column(db.String(255), default="")          # 分页 URL 模板（含 {page}），留空=不翻页
     render_mode = db.Column(db.String(16), default="static")          # static=HTTP / browser=Playwright 渲染（SPA+反爬）
     enabled = db.Column(db.Boolean, default=True)
@@ -81,6 +85,7 @@ class Article(db.Model):
     source_id = db.Column(db.Integer, db.ForeignKey("sources.id"), nullable=False, index=True)
     title = db.Column(db.String(512), default="")
     author = db.Column(db.String(128), default="")
+    source_name = db.Column(db.String(128), default="")          # 详情页提取的「来源」（区别于 Source.name）
     publish_date = db.Column(db.String(32), default="")          # 原文发布日期
     url = db.Column(db.String(1024), nullable=False, index=True)  # 同一来源内去重
     docx_path = db.Column(db.String(512), default="")            # 相对 OUTPUT_DIR 的路径
@@ -143,6 +148,7 @@ class Release(db.Model):
     dist_size = db.Column(db.BigInteger, default=0)                  # 产物目录大小（字节）
     zip_path = db.Column(db.String(255), default="")                 # 打包 zip（相对项目根）供下载
     message = db.Column(db.Text, default="")                         # 汇总：成功产物 / 失败原因
+    port = db.Column(db.Integer)                                     # 打包版启动端口（None=默认 5000）
 
     def __repr__(self):
         return f"<Release v{self.version} {self.channel} {self.status}>"

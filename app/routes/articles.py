@@ -307,6 +307,7 @@ def _import_one(parser, source, u, xpaths):
             source_id=source.id,
             title=(detail.get("title") or "未命名")[:500],
             author=(detail.get("author") or "")[:128],
+            source_name=(detail.get("source_name") or "")[:128],
             publish_date=(detail.get("publish_date") or "")[:32],
             url=u,
             docx_path=os.path.relpath(docx_path, OUTPUT_DIR).replace("\\", "/"),

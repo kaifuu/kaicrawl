@@ -10,7 +10,7 @@
 ;   避免 Program Files 下 data/ 目录无写权限导致 SQLite/文档输出失败。
 
 #define MyAppName "KaiCrawl"
-#define MyAppVersion "1.0.1"
+#define MyAppVersion "1.0.7"
 #define MyAppExeName "KaiCrawl.exe"
 
 [Setup]

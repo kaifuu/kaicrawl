@@ -45,10 +45,18 @@ class XuexiParser(GenericGovParser):
         return items[:MAX_ARTICLES_PER_RUN]
 
     def _fetch_list_by_clicks(self, since_date=None, limit=None):
-        """浏览器渲染 + 逐项点击弹窗采集：学习强国列表项无 <a>，URL 仅在弹窗目标里。"""
+        """浏览器渲染 + 逐项点击弹窗采集：学习强国列表项无 <a>，URL 仅在弹窗目标里。
+
+        配置了 source.list_xpath 时点击项限定在该区域内（栏目页多栏并存时
+        只采目标栏，不混入推荐位/侧栏里的同名节点）；未配置则全页按
+        item_selector 扫（兼容旧行为）。
+        """
         from .renderer import collect_click_links
         cap = limit or (MAX_ARTICLES_BACKFILL if since_date else MAX_ARTICLES_PER_RUN)
-        pairs = collect_click_links(self.url, self.item_selector, max_items=cap)
+        lx = (getattr(self.source, "list_xpath", "") or "").strip()
+        selector = (f"xpath={lx}//*[contains(@class,'text-link-item-title')]"
+                    if lx else self.item_selector)
+        pairs = collect_click_links(self.url, selector, max_items=cap)
         items, seen = [], set()
         for text, url in pairs:
             if not url or url in seen:
@@ -60,9 +68,10 @@ class XuexiParser(GenericGovParser):
             items.append({"url": url, "title": title, "publish_date": pub})
         if not items:
             name = getattr(self.source, "name", "") or ""
+            where = "列表区域 XPath 内的列表项" if lx else f"列表项选择器（{self.item_selector}）"
             raise ParserError(
                 f"「{name}」浏览器渲染后未采集到文章链接：页面结构可能已变化，"
-                f"请检查列表项选择器（{self.item_selector}）。来源：{self.url}"
+                f"请检查{where}。来源：{self.url}"
             )
         if since_date:
             items = [it for it in items

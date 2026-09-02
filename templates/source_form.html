@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block header %}{% if source %}编辑数据源{% else %}新增数据源{% endif %}{% endblock %}
 {% block page_icon %}bi bi-pencil-square{% endblock %}
-{% block page_desc %}配置来源的分类、入口 URL、解析器插件与作者策略。{% endblock %}
+{% block page_desc %}配置来源的分类、入口 URL、解析器插件，以及文章页时间/来源/作者三区域 XPath。{% endblock %}
 {% block content %}
 <div class="card"><div class="card-body">
 <form method="post">
@@ -42,7 +42,7 @@
     <div class="col-md-3">
       <label class="form-label">作者策略</label>
       <input class="form-control" name="author_policy"
-             value="{{ source.author_policy if source else '' }}" placeholder="单位动态填 各单位，否则留空">
+             value="{{ source.author_policy if source else '' }}" placeholder="可选，强制作者显示值；一般留空">
     </div>
     <div class="col-md-3">
       <label class="form-label">渲染模式</label>
@@ -74,19 +74,53 @@
              placeholder="可选，如 index_{page}.html 或 list_50765_{page}.html">
       <div class="form-text">可选。列表跨页时填写，{page} 从 1 起，可为相对路径；按日期抓取时自动翻页直到覆盖起始日期。</div>
     </div>
+    <div class="col-12"><hr class="mt-2 mb-2"></div>
     <div class="col-12">
-      <label class="form-label">详情页时间/来源行 XPath</label>
-      <input class="form-control" name="meta_xpath"
-             value="{{ source.meta_xpath if source else '' }}"
-             placeholder="可选，如 /html/body/div[7]/div[1]/div/p[2]">
-      <div class="form-text">可选。文章页「时间 + 来源」元信息行（如「日期：2026-08-12 16:28 来源：东城区审计局」）的 XPath，设置后优先从中抽取发布日期与作者（来源即作者）。留空则用解析器默认选择器；未命中自动回退，不影响抓取。</div>
+      <div class="fw-bold"><i class="bi bi-info-circle me-1"></i>详情页元信息（时间 / 来源 / 作者 三区域）</div>
+      <div class="form-text">三项均从文章详情页取值，可只配其中若干项：时间统一按 YYYY-MM-DD 写入 WORD（原文带时分的自动去掉）；<strong>作者留空则 WORD 不显示「作者：」</strong>（「作者策略」非空时仍优先）。未配置或未命中的项回退旧版元信息行自动识别，不影响抓取。</div>
     </div>
+    <div class="col-md-4">
+      <label class="form-label"><i class="bi bi-calendar3 me-1"></i>时间 XPath</label>
+      <input class="form-control font-monospace" name="time_xpath"
+             value="{{ source.time_xpath if source else '' }}"
+             placeholder="可选，如 //div[@class='info']/span[1]">
+      <div class="form-text">发布时间所在节点，兼容「2026-08-12 16:28」「2026年8月12日」等写法，只取日期部分。</div>
+    </div>
+    <div class="col-md-4">
+      <label class="form-label"><i class="bi bi-card-text me-1"></i>来源 XPath</label>
+      <input class="form-control font-monospace" name="source_xpath"
+             value="{{ source.source_xpath if source else '' }}"
+             placeholder="可选，如 //span[@id='source_baidu']">
+      <div class="form-text">文章页「来源：xxx」的取值节点，写入 WORD 元信息行「来源：xxx」；节点带「来源：」前缀也能识别。</div>
+    </div>
+    <div class="col-md-4">
+      <label class="form-label"><i class="bi bi-person me-1"></i>作者 XPath</label>
+      <input class="form-control font-monospace" name="author_xpath"
+             value="{{ source.author_xpath if source else '' }}"
+             placeholder="可选，如 //span[@class='author']">
+      <div class="form-text">作者取值节点；节点带「责编 / 责任编辑 / 网站编辑 / 作者」等前缀会自动剥掉，统一显示为「作者：取值」；<strong>留空 = WORD 不显示作者</strong>。</div>
+    </div>
+    {% if source and source.meta_xpath %}
+    <div class="col-12">
+      <div class="alert alert-warning mb-0 py-2">
+        该来源保留了旧版「时间来源行 XPath」：<span class="font-monospace">{{ source.meta_xpath }}</span>。
+        仅在上方对应项<strong>未配置或未命中</strong>时作为时间/来源的兜底生效；上方配置后自然优先，无需删除。
+      </div>
+    </div>
+    {% endif %}
     <div class="col-12">
       <label class="form-label">详情页正文区域 XPath</label>
       <input class="form-control" name="content_xpath"
              value="{{ source.content_xpath if source else '' }}"
              placeholder="可选，如 /html/body/div[8]/div[3] 或 //div[@class='detail_content']">
       <div class="form-text">可选。详情页正文容器的 XPath，设置后<strong>优先于</strong>解析器默认选择器精确定位正文。留空则沿用默认。匹配为空或写错时自动回退默认选择器，不影响抓取。</div>
+    </div>
+    <div class="col-12">
+      <label class="form-label">详情页正文区域 XPath（备选）</label>
+      <input class="form-control" name="content_xpath_alt"
+             value="{{ source.content_xpath_alt if source else '' }}"
+             placeholder="可选，如 /html/body/div[8]/div[4]">
+      <div class="form-text">可选。同一来源存在<strong>多种详情页模板</strong>时填：主「正文区域 XPath」未命中先试这里，仍不中才回退解析器默认选择器，按主 → 备选 → 默认依次尝试。</div>
     </div>
     <div class="col-12">
       <label class="form-label">备注</label>

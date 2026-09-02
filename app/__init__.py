@@ -22,15 +22,25 @@ def _ensure_columns():
     needed = {
         "sources": [
             ("content_xpath", "VARCHAR(255) DEFAULT ''"),
+            ("content_xpath_alt", "VARCHAR(255) DEFAULT ''"),
             ("list_xpath", "VARCHAR(255) DEFAULT ''"),
             ("date_xpath", "VARCHAR(255) DEFAULT ''"),
             ("meta_xpath", "VARCHAR(255) DEFAULT ''"),
+            ("time_xpath", "VARCHAR(255) DEFAULT ''"),
+            ("source_xpath", "VARCHAR(255) DEFAULT ''"),
+            ("author_xpath", "VARCHAR(255) DEFAULT ''"),
             ("page_url_pattern", "VARCHAR(255) DEFAULT ''"),
             ("render_mode", "VARCHAR(16) DEFAULT 'static'"),
         ],
         "tasks": [
             ("only_today", "BOOLEAN NOT NULL DEFAULT 1"),
             ("days_back", "INTEGER NOT NULL DEFAULT 1"),
+        ],
+        "releases": [
+            ("port", "INTEGER"),
+        ],
+        "articles": [
+            ("source_name", "VARCHAR(128) DEFAULT ''"),
         ],
     }
     # 新列落地时需要按旧数据回填的，在此登记：表名.列名 -> 回填 SQL（仅在该列本次新加时执行一次）

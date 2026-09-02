@@ -104,7 +104,8 @@ def export():
     ws = wb.active
     ws.title = "数据源"
     headers = ["新闻", "栏目", "来源", "来源类型", "解析器", "作者策略",
-               "列表区域XPath", "列表项日期XPath", "时间来源行XPath", "正文区域XPath",
+               "列表区域XPath", "列表项日期XPath", "时间来源行XPath(旧)",
+               "时间XPath", "来源XPath", "作者XPath", "正文区域XPath", "备选正文区域XPath",
                "分页URL模板", "渲染模式", "启用", "备注", "创建时间"]
     ws.append(headers)
     for c in ws[1]:
@@ -113,11 +114,12 @@ def export():
         ws.append([
             s.category, s.name, s.url, s.source_type, s.parser_key,
             s.author_policy, s.list_xpath, s.date_xpath, s.meta_xpath,
-            s.content_xpath, s.page_url_pattern, s.render_mode,
+            s.time_xpath, s.source_xpath, s.author_xpath,
+            s.content_xpath, s.content_xpath_alt, s.page_url_pattern, s.render_mode,
             "是" if s.enabled else "否", s.remark or "",
             s.created_at.strftime("%Y-%m-%d %H:%M") if s.created_at else "",
         ])
-    widths = [14, 22, 48, 10, 10, 12, 30, 26, 36, 30, 26, 10, 6, 24, 17]
+    widths = [14, 22, 48, 10, 10, 12, 30, 26, 36, 26, 26, 26, 30, 30, 26, 10, 6, 24, 17]
     for i, w in enumerate(widths, 1):
         ws.column_dimensions[get_column_letter(i)].width = w
     ws.freeze_panes = "A2"
@@ -142,9 +144,12 @@ def new():
             parser_key=request.form.get("parser_key", "bjdch").strip(),
             author_policy=request.form.get("author_policy", "").strip(),
             content_xpath=request.form.get("content_xpath", "").strip(),
+            content_xpath_alt=request.form.get("content_xpath_alt", "").strip(),
             list_xpath=request.form.get("list_xpath", "").strip(),
             date_xpath=request.form.get("date_xpath", "").strip(),
-            meta_xpath=request.form.get("meta_xpath", "").strip(),
+            time_xpath=request.form.get("time_xpath", "").strip(),
+            source_xpath=request.form.get("source_xpath", "").strip(),
+            author_xpath=request.form.get("author_xpath", "").strip(),
             page_url_pattern=request.form.get("page_url_pattern", "").strip(),
             render_mode=request.form.get("render_mode", "static").strip() or "static",
             remark=request.form.get("remark", "").strip(),
@@ -176,9 +181,13 @@ def edit(sid):
         s.parser_key = request.form.get("parser_key", "bjdch").strip()
         s.author_policy = request.form.get("author_policy", "").strip()
         s.content_xpath = request.form.get("content_xpath", "").strip()
+        s.content_xpath_alt = request.form.get("content_xpath_alt", "").strip()
         s.list_xpath = request.form.get("list_xpath", "").strip()
         s.date_xpath = request.form.get("date_xpath", "").strip()
-        s.meta_xpath = request.form.get("meta_xpath", "").strip()
+        # meta_xpath 已从表单移除（被时间/来源/作者三区域取代），编辑时保留旧值作兜底
+        s.time_xpath = request.form.get("time_xpath", "").strip()
+        s.source_xpath = request.form.get("source_xpath", "").strip()
+        s.author_xpath = request.form.get("author_xpath", "").strip()
         s.page_url_pattern = request.form.get("page_url_pattern", "").strip()
         s.render_mode = request.form.get("render_mode", "static").strip() or "static"
         s.remark = request.form.get("remark", "").strip()

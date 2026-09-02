@@ -48,6 +48,18 @@ IMAGE_WORKERS = 4        # WORD 生成时图片并发下载线程数
 # 服务
 HOST = "127.0.0.1"
 PORT = 5000
+
+# 启动端口覆盖：EXE 同目录（源码运行时为项目根）存在 PORT.txt 且内容为合法端口
+# (1-65535) 时以它为准。「发布管理」构建时按所选端口写入产物；部署后直接改该
+# 文件即可换端口，无需重新打包。文件缺失/内容非法时保持上面的默认值。
+try:
+    with open(os.path.join(BASE_DIR, "PORT.txt"), encoding="ascii") as _pf:
+        _port_override = int(_pf.read().strip())
+    if 1 <= _port_override <= 65535:
+        PORT = _port_override
+except Exception:
+    pass
+
 DEBUG = False
 
 # 应用版本（发布管理页的基线版本号；每次网页端构建可递增）

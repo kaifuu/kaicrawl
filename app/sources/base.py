@@ -24,8 +24,28 @@ _log = logging.getLogger(__name__)
 
 DATE_RE = re.compile(r"(20\d{2})[-/年.](\d{1,2})[-/月.](\d{1,2})")
 
+# 正文容器「有效命中」的最小可读文本量：少于它视为空壳（正文在别处/未渲染）
+_MIN_CONTENT_CHARS = 30
+
 # 视为块级文本的标签
 _TEXT_TAGS = ("p", "li", "h1", "h2", "h3", "h4", "h5", "strong")
+
+# 视频播放器部件的 class 特征（class 词元含 video / player 即整体剔除，正文不收）
+def _is_video_widget(tag):
+    cls = tag.get("class") or []
+    if isinstance(cls, str):
+        cls = cls.split()
+    return any("video" in t or "player" in t for t in cls)
+
+# 播放器泄漏到正文的配置/控件文本行（结构性剔除漏网时的文本级兜底）：
+# 「code: xxx」「vid: xxx」「mediaAuth:」「requestId(player):」「播放时间:」
+# 「提示信息」「刷新视频地址」「诊断查看建议」「确认取消」「00:00 / 07:07」
+_VIDEO_JUNK_RE = re.compile(
+    r"^(?:"
+    r"(?:code|vid|mediaAuth|uuid|requestId(?:\((?:player|vod)\))?|ver|播放时间)[：:]"
+    r"|刷新视频地址|诊断查看建议|确认取消|提示信息"
+    r"|\d{1,2}:\d{2}\s*/\s*\d{1,2}:\d{2}"
+    r")")
 
 
 class BaseParser:
@@ -285,42 +305,77 @@ class GenericGovParser(BaseParser):
                 return el
         return None
 
-    def _content_element(self, soup, resp_text):
+    def _content_element(self, soup, resp_text, doc=None, drop=()):
         """定位正文容器，返回 BS4 tag 供 _content_to_blocks 处理。
 
-        优先级：source.content_xpath（lxml 求值）> content_selectors（CSS 启发式）。
-        XPath 留空或匹配为空 / 抛错时，记 warning 并回退默认选择器，
-        不让一个写错的 XPath 拖垮整个来源抓取。
+        优先级：source.content_xpath > source.content_xpath_alt（备选，同站
+        多模板时主 XPath 未命中依次尝试）> content_selectors（CSS 启发式）。
+        「命中」指匹配到元素**且**其中可读文本不少于 _MIN_CONTENT_CHARS 字
+        （多模板站点常见主 XPath 命中空壳容器、正文在备选路径的情况）。
+        XPath 留空或未命中 / 近空 / 抛错时，记 warning 并回退，不让一个
+        写错的 XPath 拖垮整个来源抓取。
+        doc 可传入已解析的 lxml 文档（与元信息三区域 XPath 共用一次解析）；
+        drop 为要从正文剔除的节点（时间/来源/作者命中的元信息节点，连同其
+        容器内最浅祖先，避免元信息行重复混进正文块），仅在 XPath 命中的
+        lxml 路径生效，CSS 回退路径维持原行为。
         """
-        xpath = (getattr(self.source, "content_xpath", "") or "").strip()
-        if xpath:
-            try:
+        xpaths = [xp for xp in (
+            (getattr(self.source, "content_xpath", "") or "").strip(),
+            (getattr(self.source, "content_xpath_alt", "") or "").strip(),
+        ) if xp]
+        if xpaths:
+            if doc is None:
                 doc = lxml.html.fromstring(resp_text or "")
-                matches = doc.xpath(xpath)
-                # xpath 可能返回元素 / 文本 / 字符串，只取元素节点
-                el = next((m for m in matches if hasattr(m, "tag")), None)
-                if el is not None:
-                    frag = lxml_etree.tostring(el, encoding="unicode")
-                    node = BeautifulSoup(frag, "lxml")
-                    container = node.body or node
-                    kids = container.find_all(recursive=False)
-                    return kids[0] if len(kids) == 1 else container
-                _log.warning("content_xpath 未匹配到元素，回退默认选择器：%s", xpath)
-            except Exception as e:
-                _log.warning("content_xpath 执行失败，回退默认选择器：%s -> %s", xpath, e)
+            for xpath in xpaths:
+                try:
+                    matches = doc.xpath(xpath)
+                    # xpath 可能返回元素 / 文本 / 字符串，只取元素节点
+                    el = next((m for m in matches if hasattr(m, "tag")), None)
+                    if el is not None:
+                        readable = "".join(
+                            t for t in el.xpath(
+                                ".//text()[not(ancestor::script) and not(ancestor::style)]")
+                            if t.strip())
+                        if len(readable) < _MIN_CONTENT_CHARS:
+                            # 命中的是空壳容器（多模板站点正文在备选路径），不算数
+                            _log.warning("content_xpath 命中但可读文本仅 %d 字（<%d），试下一个：%s",
+                                         len(readable), _MIN_CONTENT_CHARS, xpath)
+                            continue
+                        for node in drop:
+                            if node is None:
+                                continue
+                            cur = node
+                            while cur is not None and cur is not el:
+                                if cur.getparent() is el:
+                                    el.remove(cur)
+                                    break
+                                cur = cur.getparent()
+                        frag = lxml_etree.tostring(el, encoding="unicode")
+                        node = BeautifulSoup(frag, "lxml")
+                        container = node.body or node
+                        kids = container.find_all(recursive=False)
+                        return kids[0] if len(kids) == 1 else container
+                    _log.warning("content_xpath 未匹配到元素：%s", xpath)
+                except Exception as e:
+                    _log.warning("content_xpath 执行失败：%s -> %s", xpath, e)
+            _log.warning("正文区域 XPath（含备选）均未命中，回退默认选择器：%s",
+                         " | ".join(xpaths))
         return self._select_first(soup, self.content_selectors)
 
-    def _meta_text(self, soup, resp_text):
-        """取「时间 + 来源」元信息行文本。返回 (文本, 是否 XPath 命中)。
+    def _meta_text(self, soup, resp_text, doc=None):
+        """取旧版「时间 + 来源」元信息行文本（时间/来源三区域未配时的兜底）。
 
+        返回 (文本, 是否 XPath 命中)。
         优先级：source.meta_xpath（lxml 求值）> author_selectors（CSS 启发式）。
         XPath 留空或匹配为空 / 抛错时，记 warning 并回退默认选择器，
         容错策略与 _content_element 的 content_xpath 一致。
+        doc 可传入已解析的 lxml 文档复用。
         """
         xpath = (getattr(self.source, "meta_xpath", "") or "").strip()
         if xpath:
             try:
-                doc = lxml.html.fromstring(resp_text or "")
+                if doc is None:
+                    doc = lxml.html.fromstring(resp_text or "")
                 matches = doc.xpath(xpath)
                 el = next((m for m in matches if hasattr(m, "tag")), None)
                 if el is not None:
@@ -343,9 +398,45 @@ class GenericGovParser(BaseParser):
         el = self._select_first(soup, self.author_selectors)
         return (clean_text(el.get_text(" ")) if el else ""), False
 
+    def _xpath_field(self, doc, attr):
+        """按 source.<attr>（time_xpath / source_xpath / author_xpath）取详情页字段。
+
+        返回 (文本, 命中的元素节点或 None)。未配置 / 未命中 / 抛错均返回 ("", None)，
+        容错口径与 content_xpath 一致：一个写错的 XPath 不拖垮抓取，该项留空走兜底。
+        """
+        xp = (getattr(self.source, attr, "") or "").strip()
+        if not xp or doc is None:
+            return "", None
+        try:
+            m = next((x for x in doc.xpath(xp) if hasattr(x, "tag")), None)
+        except Exception as e:
+            _log.warning("%s 执行失败，该项留空：%s -> %s", attr, xp, e)
+            return "", None
+        if m is None:
+            _log.warning("%s 未匹配到元素，该项留空：%s", attr, xp)
+            return "", None
+        # 兄弟 span 文本以空格连接，避免「来源：xx」「时间」直连粘成一串（同 _meta_text）
+        text = clean_text(" ".join(t for t in m.itertext() if t.strip()))
+        # 兼容命中的是带标签/括号的节点（整段「来源：xxx」「（责编：张三、李四）」
+        # 「发布时间：2026-08-12」），剥掉外层括号与行首标签、尾部闭合括号，
+        # 各站不同的署名叫法在 WORD 中统一为「作者：取值」
+        stripped = re.sub(r"^[（(【\[]?\s*(来源|作者|责任编辑|网站编辑|责编|撰稿|编辑|发布时间|发布日期|时间|日期)[：:]\s*",
+                          "", text, count=1)
+        if stripped != text:
+            text = re.sub(r"[）)】\]]+$", "", stripped).strip()
+        else:
+            wrapped = re.fullmatch(r"[（(【\[](.+)[）)】\]]", text)   # 无标签但整体括号包裹（如「（王潇潇）」）
+            if wrapped:
+                text = wrapped.group(1).strip()
+        return text, m
+
     def fetch_detail(self, url):
-        wait_x = (getattr(self.source, "content_xpath", "") or "").strip() or None
-        # 未配 content_xpath 时用首个内容选择器作就绪标志（CSS），命中即收
+        # 就绪标志 = 主/备选正文 XPath 的并集（任一命中即收）；均未配时用首个内容选择器（CSS）
+        xps = [xp for xp in (
+            (getattr(self.source, "content_xpath", "") or "").strip(),
+            (getattr(self.source, "content_xpath_alt", "") or "").strip(),
+        ) if xp]
+        wait_x = " | ".join(xps) or None
         wait_c = None
         if not wait_x and self.content_selectors:
             wait_c = self.content_selectors[0]
@@ -355,22 +446,42 @@ class GenericGovParser(BaseParser):
         title_el = self._select_first(soup, self.title_selectors)
         title = clean_text(title_el.get_text()) if title_el else clean_text(soup.title.get_text() if soup.title else "")
 
-        content_el = self._content_element(soup, resp_text)
-        blocks = self._content_to_blocks(content_el, base_url=url) if content_el else []
+        # lxml 文档只解析一次：时间/来源/作者三区域 XPath 与 content_xpath 共用
+        try:
+            doc = lxml.html.fromstring(resp_text or "")
+        except Exception:
+            doc = None
 
-        meta_text, meta_hit = self._meta_text(soup, resp_text)
-        author = self._extract_author(meta_text)
-        publish_date = self._extract_date(soup)
-        if meta_hit:
-            # 元信息行自带发布时间（如「日期：2026-08-12 16:28 来源：…」），比全页扫描准
-            m = DATE_RE.search(meta_text)
-            if m:
-                y, mo, d = m.groups()
-                publish_date = f"{y}-{int(mo):02d}-{int(d):02d}"
+        # 元信息三区域（source.time_xpath / source_xpath / author_xpath，均可选，取自文章页）。
+        # 作者严格按配置：未配 author_xpath 则 detail["author"] 为空，WORD 不显示作者。
+        time_text, time_el = self._xpath_field(doc, "time_xpath")
+        source_text, source_el = self._xpath_field(doc, "source_xpath")
+        author_text, author_el = self._xpath_field(doc, "author_xpath")
+        author = author_text
+        source_name = source_text
+        # 时间自带时分的（如「2026-08-12 16:28」）只留日期，统一 YYYY-MM-DD
+        publish_date = self._norm_date(time_text)
+
+        # 兜底：三区域未配/未命中的项，回退旧版元信息行（meta_xpath 或默认选择器）
+        meta_text, meta_hit = self._meta_text(soup, resp_text, doc=doc)
+        if not publish_date:
+            if meta_hit:
+                # 元信息行自带发布时间（如「日期：2026-08-12 16:28 来源：…」），比全页扫描准
+                publish_date = self._norm_date(meta_text)
+            if not publish_date:
+                publish_date = self._extract_date(soup)
+        if not source_name:
+            source_name = self._extract_source_kw(meta_text)
+
+        # 正文：命中的元信息节点若在正文容器内，先剔除再转块，避免时间/来源/作者重复混进正文
+        drop = [el for el in (time_el, source_el, author_el) if el is not None]
+        content_el = self._content_element(soup, resp_text, doc=doc, drop=drop)
+        blocks = self._content_to_blocks(content_el, base_url=url) if content_el else []
 
         return {
             "title": title,
             "author": author,
+            "source_name": source_name,
             "publish_date": publish_date,
             "blocks": blocks,
             "base_url": url,
@@ -381,7 +492,8 @@ class GenericGovParser(BaseParser):
         """按调用方显式给出的 XPath 解析详情页（URL 批量导入用）。
 
         四个 XPath 均为绝对/相对 lxml 表达式：正文区域必填，未命中抛 ParserError；
-        标题/作者/日期未填或未命中时回退本解析器的启发式。正文区域命中后，
+        标题/日期未填或未命中时回退本解析器的启发式，作者不回退（严格按
+        author_xpath 取值，未填/未命中则留空，WORD 不显示）。正文区域命中后，
         会把标题/作者/日期命中的节点及其在正文容器内的最浅祖先（如 h1、
         元信息行 div）从正文中剔除，避免标题和元信息重复混进正文块。
         """
@@ -449,16 +561,14 @@ class GenericGovParser(BaseParser):
         container = kids[0] if len(kids) == 1 else container
         blocks = self._content_to_blocks(container, base_url=url) if container else []
 
-        # 标题/作者/日期未命中 XPath 时，回退到本解析器的启发式
+        # 标题/日期未命中 XPath 时，回退到本解析器的启发式；
+        # 作者不回退（严格按配置：author_xpath 未填/未命中则留空，WORD 不显示）
         if not (title or author or publish_date) or not blocks:
             soup = BeautifulSoup(resp_text or "", "lxml")
             if not title:
                 t = self._select_first(soup, self.title_selectors)
                 title = clean_text(t.get_text()) if t else \
                     clean_text(soup.title.get_text() if soup.title else "")
-            if not author:
-                meta_text, _ = self._meta_text(soup, resp_text)
-                author = self._extract_author(meta_text)
             if not publish_date:
                 publish_date = self._extract_date(soup)
 
@@ -475,8 +585,15 @@ class GenericGovParser(BaseParser):
 
         base_url 为详情页 URL，用于把相对图片地址解析成绝对地址。详情页图片通常与
         文章 HTML 同目录，必须按详情 URL 解析；若按来源列表 URL 解析会丢目录段导致 404。
+
+        带视频的文章忽略视频：播放器部件（class 词元含 video / player，如学习强国的
+        article-video / prism-player）整体剔除——其中的配置行（code:/vid:/mediaAuth:…）、
+        控件文本与封面图均不进 WORD；结构外漏网的同类文本行再按 _VIDEO_JUNK_RE 兜底。
         """
         blocks = []
+        for el in container.find_all(_is_video_widget):
+            if not el.decomposed:
+                el.decompose()
         for el in container.descendants:
             name = getattr(el, "name", None)
             if not name:
@@ -488,7 +605,7 @@ class GenericGovParser(BaseParser):
                                    "alt": (el.get("alt") or "").strip()})
             elif name in _TEXT_TAGS:
                 text = clean_text(el.get_text())
-                if text:
+                if text and not _VIDEO_JUNK_RE.match(text):
                     blocks.append({"type": "text", "data": text})
         # 相邻相同文本去重
         result, prev = [], None
@@ -502,20 +619,13 @@ class GenericGovParser(BaseParser):
             result.append(b)
         return result
 
-    def _extract_author(self, text):
-        """从「责任编辑：张三」「作者：李四」「来源：人民网」等抽取作者。
-
-        文章页的 来源（如「日期：2026-08-12 16:28 来源：东城区审计局」）
-        即发布单位，优先级排在责任编辑/作者之后、撰稿/编辑之前。
-        """
+    def _extract_source_kw(self, text):
+        """从元信息行文本抽「来源：xxx」的值（source_xpath 未配时的兜底）。"""
         if not text:
             return ""
-        for kw in ("责任编辑", "作者", "来源", "撰稿", "编辑"):
-            m = re.search(kw + r"[：:]\s*([^\s，,。/]+)", text)
-            if m:
-                val = re.sub(r"\d+$", "", clean_text(m.group(1)))  # 去掉混入的阅读量/ID 尾数
-                if val:
-                    return val
+        m = re.search(r"来源[：:]\s*([^\s，,。/]+)", text)
+        if m:
+            return re.sub(r"\d+$", "", clean_text(m.group(1)))  # 去掉混入的阅读量/ID 尾数
         return ""
 
     def _extract_date(self, soup):

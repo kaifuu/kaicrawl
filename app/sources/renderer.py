@@ -19,11 +19,13 @@ JS 包只下载一次）；任务自身只 new/close page。任务异常后检�
 playwright 未安装 / 浏览器未下载时给出可操作的 ParserError 提示。
 """
 import logging
+import os
 import queue
+import sys
 import threading
 import time
 
-from config import DEFAULT_UA, RENDER_WORKERS
+from config import BASE_DIR, DEFAULT_UA, RENDER_WORKERS
 from ..utils import ParserError
 
 _log = logging.getLogger(__name__)
@@ -53,9 +55,22 @@ def _browser_ok(browser):
 
 def _launch_browser():
     """在当前渲染线程内启动 playwright + Chromium + 持久 context。失败抛异常。"""
+    # 打包版（win10 渠道）：浏览器随包分发在 EXE 旁 ms-playwright\，指给它看；
+    # 源码运行则用 playwright 默认注册表位置（本机 playwright install 的那份）。
+    if getattr(sys, "frozen", False):
+        bundled = os.path.join(BASE_DIR, "ms-playwright")
+        if os.path.isdir(bundled):
+            os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", bundled)
     from playwright.sync_api import sync_playwright
     pw = sync_playwright().start()
-    browser = pw.chromium.launch(headless=True)
+    try:
+        browser = pw.chromium.launch(headless=True)
+    except Exception as e:
+        # 内置浏览器缺失/被杀软误删时回退驱动系统 Chrome（目标机装了 Chrome 即可用）
+        try:
+            browser = pw.chromium.launch(headless=True, channel="chrome")
+        except Exception:
+            raise e   # 回退也不行：保留原始错误，提示更贴近真因
     context = browser.new_context(user_agent=DEFAULT_UA, locale="zh-CN")
     return pw, browser, context
 
@@ -75,8 +90,14 @@ def _worker_loop(w):
     try:
         pw, browser, context = _launch_browser()
     except ImportError:
-        w.init_error = ParserError(
-            "playwright 未安装：请执行 pip install playwright && python -m playwright install chromium")
+        if getattr(sys, "frozen", False):
+            # 打包版（EXE）内不可能 pip 安装，指路可操作的替代方案
+            w.init_error = ParserError(
+                "打包版未内置浏览器渲染组件（Win7 跑不了 Chromium）：请把该数据源的"
+                "「渲染模式」改为静态解析，或改用「手动导入 / URL 批量导入」")
+        else:
+            w.init_error = ParserError(
+                "playwright 未安装：请执行 pip install playwright && python -m playwright install chromium")
     except Exception as e:
         w.init_error = ParserError(f"启动无头浏览器失败：{e}（若为浏览器缺失，"
                                   f"请执行 python -m playwright install chromium）")

@@ -3,7 +3,7 @@
 {% block title %}发布管理 · KaiCrawl{% endblock %}
 {% block header %}发布管理{% endblock %}
 {% block page_icon %}bi bi-box-seam{% endblock %}
-{% block page_desc %}一键把工程打包成 EXE（Win7 正式包 / 冒烟包），版本号与更新说明全程留档，构建日志实时滚动。{% endblock %}
+{% block page_desc %}一键把工程打包成 EXE（Win10 正式包 / Win7 正式包 / 冒烟包），版本号与更新说明全程留档，构建日志实时滚动。{% endblock %}
 {% block page_actions %}
 {% if not frozen and current_user.has_perm('release:build') %}
 <button class="btn btn-sm btn-primary" id="rel-new-btn" {% if building %}disabled title="已有构建正在进行"{% endif %} data-bs-toggle="modal" data-bs-target="#relBuildModal">
@@ -39,11 +39,11 @@
     </div>
   </div>
   {% if not frozen and not toolchain %}
-  <div class="detail-msg">未找到 Win7 兼容的 Python 3.8/3.9，只能发「冒烟包」验证链路；正式 Win7 包请先装 <a href="https://www.python.org/downloads/release/python-3810/" target="_blank" rel="noopener noreferrer">Python 3.8.10</a>（详见 build/发布说明.md）。</div>
+  <div class="detail-msg">未找到 Win7 兼容的 Python 3.8/3.9：Win10 正式包不受影响（用当前 Python 构建）；如需 Win7 包请先装 <a href="https://www.python.org/downloads/release/python-3810/" target="_blank" rel="noopener noreferrer">Python 3.8.10</a>（详见 build/发布说明.md）。</div>
   {% elif frozen %}
   <div class="detail-msg">当前运行的是打包版，无法再打包；请在源码环境的电脑上操作发布。</div>
   {% else %}
-  <div class="detail-msg">Win7 正式包用 Python 3.8 工具链独立构建；冒烟包用当前解释器快速验证打包链路，产物不含 Win7 保证。</div>
+  <div class="detail-msg">Win10 正式包用当前 Python 构建、内置浏览器渲染组件；Win7 包用 Python 3.8 工具链独立构建（无渲染组件）；冒烟包快速验证打包链路。</div>
   {% endif %}
 </div></div>
 
@@ -63,6 +63,7 @@
     <th>状态</th>
     <th>更新说明</th>
     <th>Python</th>
+    <th>端口</th>
     <th>产物大小</th>
     <th><i class="bi bi-calendar3"></i> 开始时间</th>
     <th>耗时</th>
@@ -80,6 +81,7 @@
       </td>
       <td class="msg-cell" title="{{ r.note or r.message }}">{{ r.note or r.message or '—' }}</td>
       <td class="log-time">{{ r.python_ver or '—' }}</td>
+      <td class="log-time">{% if r.port %}{{ r.port }}{% else %}5000{% endif %}</td>
       <td class="log-time">{% if r.dist_size %}{{ (r.dist_size / 1048576) | round(1) }} MB{% else %}—{% endif %}</td>
       <td class="log-time">{{ r.started_at.strftime('%m-%d %H:%M:%S') if r.started_at else '—' }}</td>
       <td class="log-dur">{% if r.started_at %}<i class="bi bi-stopwatch"></i>{{ ((r.finished_at or now) - r.started_at).total_seconds() | int }}s{% else %}—{% endif %}</td>
@@ -106,7 +108,7 @@
       </td>
     </tr>
   {% else %}
-    <tr><td colspan="9" class="empty-state"><span class="es-ico"><i class="bi bi-box-seam"></i></span><span class="es-msg">还没有发布记录，点右上角「新建发布」打出第一个包</span></td></tr>
+    <tr><td colspan="10" class="empty-state"><span class="es-ico"><i class="bi bi-box-seam"></i></span><span class="es-msg">还没有发布记录，点右上角「新建发布」打出第一个包</span></td></tr>
   {% endfor %}
   </tbody>
 </table>
@@ -132,14 +134,24 @@
             <div class="form-text">数字点分格式（如 1.0.1）；已按最新版本自动 +1，可手改。</div>
           </div>
           <div class="mb-3">
+            <label class="form-label" for="rel-port">启动端口</label>
+            <input class="form-control form-control-sm" type="number" name="port" id="rel-port"
+                   value="{{ suggest_port }}" min="1" max="65535">
+            <div class="form-text">打包版 EXE 的服务端口，与当前工程（{{ cur_port }}）互不影响、可同时运行；留空则用默认 5000。部署后改 EXE 旁 PORT.txt 即可换端口，无需重打包。</div>
+          </div>
+          <div class="mb-3">
             <label class="form-label d-block">发布渠道</label>
             <div class="form-check">
-              <input class="form-check-input" type="radio" name="channel" id="ch-win7" value="win7" {% if toolchain %}checked{% endif %}>
-              <label class="form-check-label" for="ch-win7"><b>Win7 正式包</b> — 用 Python 3.8/3.9 工具链独立环境构建，可在 Win7 安装运行{% if not toolchain %}（<span class="text-warning">本机未装 3.8/3.9，选此项会失败</span>）{% endif %}</label>
+              <input class="form-check-input" type="radio" name="channel" id="ch-win10" value="win10" checked>
+              <label class="form-check-label" for="ch-win10"><b>Win10 正式包</b> — 用当前 Python 构建，内置 Playwright + Chromium 浏览器渲染（产物约 200MB），Win10 及以上可用</label>
             </div>
             <div class="form-check">
-              <input class="form-check-input" type="radio" name="channel" id="ch-smoke" value="smoke" {% if not toolchain %}checked{% endif %}>
-              <label class="form-check-label" for="ch-smoke"><b>冒烟验证包</b> — 用当前 Python 快速验证打包链路，产物无 Win7 保证</label>
+              <input class="form-check-input" type="radio" name="channel" id="ch-win7" value="win7">
+              <label class="form-check-label" for="ch-win7"><b>Win7 正式包</b> — 用 Python 3.8/3.9 工具链独立环境构建，可在 Win7 安装运行（无浏览器渲染组件）{% if not toolchain %}（<span class="text-warning">本机未装 3.8/3.9，选此项会失败</span>）{% endif %}</label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" type="radio" name="channel" id="ch-smoke" value="smoke">
+              <label class="form-check-label" for="ch-smoke"><b>冒烟验证包</b> — 用当前 Python 快速验证打包链路（轻量，无渲染组件）</label>
             </div>
           </div>
           <div class="mb-1">

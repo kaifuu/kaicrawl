@@ -10,7 +10,13 @@ PyInstaller 打包（frozen）后：数据存放在 EXE 同目录的 data/ 下�
 """
 import sys
 import threading
+import warnings
 import webbrowser
+
+# 本机 paddlex 依赖的 chardet(7.x) 超出 requests 2.32 的兼容检查范围，启动必刷
+# RequestsDependencyWarning；requests 实际用 charset_normalizer 检测编码，不受影响。
+# 须在首个 import requests 之前过滤。打包版由 spec 剔除 chardet，此过滤兜底源码运行。
+warnings.filterwarnings("ignore", message=r".*doesn't match a supported version.*")
 
 from app import create_app
 from config import HOST, PORT, DEBUG

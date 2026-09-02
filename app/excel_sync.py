@@ -81,6 +81,7 @@ def read_sources_from_excel(path):
     i_src = col_idx.get("来源") or 2
     i_remark = col_idx.get("备注")              # 备注列（无则为 None，不再误取来源列）
     i_lx = col_idx.get("列表区域XPath")          # 列表页文章区域 XPath（可选）
+    i_cxa = col_idx.get("备选正文区域XPath")      # 正文区域 XPath 备选（可选，多模板站点）
     i_pg = col_idx.get("分页URL模板")            # 翻页 URL 模板（可选）
     i_rm = col_idx.get("渲染模式")               # static / browser（可选）
 
@@ -109,6 +110,7 @@ def read_sources_from_excel(path):
             "parser_key": pkey,
             "remark": str(remark or "").strip(),
             "list_xpath": str(_cell(row, i_lx) or "").strip(),
+            "content_xpath_alt": str(_cell(row, i_cxa) or "").strip(),
             "page_url_pattern": str(_cell(row, i_pg) or "").strip(),
             "render_mode": str(_cell(row, i_rm) or "").strip(),
         })
@@ -136,17 +138,20 @@ def import_from_excel(path, *, replace=False):
             # 抓取配置：Excel 填写了才覆盖（留空=保留界面手工调整值）
             if r["list_xpath"]:
                 s.list_xpath = r["list_xpath"]
+            if r["content_xpath_alt"]:
+                s.content_xpath_alt = r["content_xpath_alt"]
             if r["page_url_pattern"]:
                 s.page_url_pattern = r["page_url_pattern"]
             if r["render_mode"]:
                 s.render_mode = r["render_mode"]
         else:
-            author_policy = "各单位" if r["category"] == "单位动态" else ""
+            # 作者一律由文章页作者 XPath 提取（部门动态等无作者的来源不显示），不再自动填策略值
             s = Source(
                 category=r["category"], name=r["name"], url=r["url"],
                 source_type=r["source_type"], parser_key=r["parser_key"],
-                author_policy=author_policy, enabled=True, remark=r["remark"],
-                list_xpath=r["list_xpath"], page_url_pattern=r["page_url_pattern"],
+                author_policy="", enabled=True, remark=r["remark"],
+                list_xpath=r["list_xpath"], content_xpath_alt=r["content_xpath_alt"],
+                page_url_pattern=r["page_url_pattern"],
                 render_mode=r["render_mode"] or "static",
             )
             db.session.add(s)
